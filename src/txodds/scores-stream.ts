@@ -26,15 +26,17 @@ function mapScorePayload(raw: RawScorePayload): ScoreEvent {
   const isYellowCard = action === "yellow_card";
   const isCorner = action === "corner";
 
-  const defaultTeam = { Total: { Goals: 0, YellowCards: 0, RedCards: 0, Corners: 0 } };
+  function safeTeam(team?: { Total?: Partial<{ Goals: number; YellowCards: number; RedCards: number; Corners: number }> }) {
+    return { Total: { Goals: team?.Total?.Goals ?? 0, YellowCards: team?.Total?.YellowCards ?? 0, RedCards: team?.Total?.RedCards ?? 0, Corners: team?.Total?.Corners ?? 0 } };
+  }
 
   return {
     fixtureId: raw.FixtureId,
     gameState: raw.GameState || action,
     statusSoccerId: STATUS_MAP[raw.StatusId || 0] || "NS",
     scoreSoccer: {
-      Participant1: raw.Score?.Participant1 || defaultTeam,
-      Participant2: raw.Score?.Participant2 || defaultTeam,
+      Participant1: safeTeam(raw.Score?.Participant1),
+      Participant2: safeTeam(raw.Score?.Participant2),
     },
     dataSoccer: (isGoal || isRedCard || isPenalty || isVAR || isYellowCard || isCorner) ? {
       Goal: isGoal,

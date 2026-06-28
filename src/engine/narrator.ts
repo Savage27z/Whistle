@@ -10,6 +10,20 @@ let apiBackoffMs = 30_000;
 const BASE_API_INTERVAL_MS = 30_000;
 const MAX_API_BACKOFF_MS = 300_000;
 
+export function canCallOpenRouter(): boolean {
+  return Date.now() - lastApiCall >= apiBackoffMs;
+}
+
+export function markOpenRouter429(): void {
+  apiBackoffMs = Math.min(apiBackoffMs * 2, MAX_API_BACKOFF_MS);
+  lastApiCall = Date.now();
+}
+
+export function markOpenRouterSuccess(): void {
+  apiBackoffMs = BASE_API_INTERVAL_MS;
+  lastApiCall = Date.now();
+}
+
 export function escHtml(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
@@ -37,8 +51,7 @@ function confidenceBar(confidence: number): string {
 }
 
 export async function narrateAlert(alert: DivergenceAlert, matchState?: MatchState, oddsSnapshot?: { name: string; value: number; direction: "up" | "down" | "stable" }[]): Promise<string> {
-  const now = Date.now();
-  if (now - lastApiCall < apiBackoffMs) {
+  if (!canCallOpenRouter()) {
     return formatFallback(alert, matchState, oddsSnapshot);
   }
   if (!config.openrouterApiKey) return formatFallback(alert, matchState, oddsSnapshot);
@@ -65,7 +78,6 @@ Rules:
 - Do NOT use any formatting characters like *, _, ~, \`, [ ]`;
 
   try {
-    lastApiCall = Date.now();
     const res = await fetch(OPENROUTER_URL, {
       method: "POST",
       headers: {
@@ -82,7 +94,7 @@ Rules:
 
     if (!res.ok) {
       if (res.status === 429) {
-        apiBackoffMs = Math.min(apiBackoffMs * 2, MAX_API_BACKOFF_MS);
+        markOpenRouter429();
         logger.warn("narrator", `OpenRouter 429 — backing off to ${Math.round(apiBackoffMs / 1000)}s`);
       } else {
         logger.error("narrator", `OpenRouter error: ${res.status}`);
@@ -90,7 +102,7 @@ Rules:
       return formatFallback(alert, matchState, oddsSnapshot);
     }
 
-    apiBackoffMs = BASE_API_INTERVAL_MS;
+    markOpenRouterSuccess();
 
     const data = (await res.json()) as { choices: { message: { content: string } }[] };
     const raw = data.choices?.[0]?.message?.content;

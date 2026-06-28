@@ -14,7 +14,7 @@ import type { EventTracker } from "../engine/event-tracker";
 import type { Severity, DivergenceDetector } from "../engine/divergence";
 import type { OddsTracker } from "../engine/odds-tracker";
 import { logger } from "../utils/logger";
-import { escHtml } from "../engine/narrator";
+import { escHtml, canCallOpenRouter, markOpenRouter429, markOpenRouterSuccess } from "../engine/narrator";
 import { config } from "../utils/config";
 
 export function setupCommands(
@@ -348,6 +348,9 @@ export function setupCommands(
     msg += `TxODDS streams: ${global}\n`;
     msg += `Active fixtures: ${fixtureCount}\n`;
 
+    msg += `🔗 Solana subscription: ${config.solanaPrivateKey ? "✅ Active (devnet)" : "❌ Not configured"}\n`;
+    msg += `🤖 AI narration: ${config.openrouterApiKey ? (canCallOpenRouter() ? "✅ Ready" : "⏳ Rate-limited") : "❌ No API key"}\n`;
+
     const watching = getUserWatchList(ctx.from?.id || 0);
     msg += `Your watches: ${watching.length}\n`;
 
@@ -444,6 +447,10 @@ export function setupCommands(
       return ctx.reply("AI predictions require OpenRouter API key.");
     }
 
+    if (!canCallOpenRouter()) {
+      return ctx.reply("AI is rate-limited right now. Try again in a minute.");
+    }
+
     const markets = oddsTracker.getMarketSummary(fixtureId);
     const edge = divergenceDetector.getEdgeStats();
 
@@ -488,9 +495,11 @@ Rules:
       });
 
       if (!res.ok) {
+        if (res.status === 429) markOpenRouter429();
         return ctx.reply("AI prediction unavailable right now (rate limited). Try again in a few minutes.");
       }
 
+      markOpenRouterSuccess();
       const data = (await res.json()) as { choices: { message: { content: string } }[] };
       const raw = data.choices?.[0]?.message?.content;
       if (!raw) return ctx.reply("Couldn't generate prediction. Try again.");
