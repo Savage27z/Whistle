@@ -5,7 +5,14 @@ import type { MatchState } from "./event-tracker";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
+let lastApiCall = 0;
+const MIN_API_INTERVAL_MS = 5000;
+
 export async function narrateAlert(alert: DivergenceAlert, matchState?: MatchState): Promise<string> {
+  const now = Date.now();
+  if (now - lastApiCall < MIN_API_INTERVAL_MS) {
+    return formatFallback(alert, matchState);
+  }
   if (!config.openrouterApiKey) return formatFallback(alert, matchState);
 
   const team1 = matchState?.team1 || "Home";
@@ -26,6 +33,7 @@ Data: ${JSON.stringify(alert.data)}
 Format: Use emoji prefix based on severity (🔴 critical, 🟠 high, 🟡 medium, ⚪ low). First line is the headline. Rest is the actionable insight. End with the implied trading angle if obvious.`;
 
   try {
+    lastApiCall = Date.now();
     const res = await fetch(OPENROUTER_URL, {
       method: "POST",
       headers: {
