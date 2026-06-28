@@ -56,6 +56,19 @@ export function unsubscribeWatch(telegramId: number, fixtureId: number): void {
   saveDb();
 }
 
+export function unsubscribeAll(telegramId: number): number {
+  const db = getDb();
+  let count = 0;
+  for (const key of Object.keys(db.watches)) {
+    if (key.startsWith(`${telegramId}:`)) {
+      delete db.watches[key];
+      count++;
+    }
+  }
+  if (count > 0) saveDb();
+  return count;
+}
+
 export function getUserWatchList(telegramId: number): { fixture_id: number; alert_count: number }[] {
   const db = getDb();
   return Object.values(db.watches)

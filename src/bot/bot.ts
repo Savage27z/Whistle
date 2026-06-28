@@ -16,7 +16,8 @@ export function createBot(
   const bot = new Bot(config.telegramBotToken);
 
   bot.catch((err) => {
-    logger.error("bot", `Unhandled error: ${err.message}`);
+    const cmd = err.ctx?.update?.message?.text?.split(" ")[0] || "unknown";
+    logger.error("bot", `Unhandled error in ${cmd}: ${err.message}`);
   });
 
   setupCommands(bot, eventTracker, onWatch, getStreamHealth, divergenceDetector, oddsTracker);

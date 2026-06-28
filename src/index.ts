@@ -8,7 +8,8 @@ import type { DivergenceAlert } from "./engine/divergence";
 import { narrateAlert, formatMatchEvent } from "./engine/narrator";
 import { createScoresStream } from "./txodds/scores-stream";
 import { createOddsStream } from "./txodds/odds-stream";
-import { getSubscribersForFixture, getUserSettings, incrementAlertCount, logAlert } from "./db/queries";
+import type { StoppableEmitter } from "./txodds/scores-stream";
+import { getSubscribersForFixture, getUserSettings, incrementAlertCount, logAlert, unsubscribeWatch } from "./db/queries";
 import { fetchFixtures } from "./txodds/client";
 import { getDb } from "./db/schema";
 import type { Bot } from "grammy";
@@ -18,7 +19,7 @@ const oddsTracker = new OddsTracker();
 const eventTracker = new EventTracker();
 const divergenceDetector = new DivergenceDetector();
 divergenceDetector.setMatchStateResolver((id) => eventTracker.getMatchState(id));
-const activeStreams = new Set<number>();
+const activeStreams = new Map<number, { scores: StoppableEmitter; odds: StoppableEmitter } | null>();
 let globalStreamsStarted = false;
 
 let bot: Bot;
@@ -40,17 +41,25 @@ async function deliverAlert(alert: DivergenceAlert): Promise<void> {
 
   const subscribers = getSubscribersForFixture(alert.fixtureId);
 
-  for (const userId of subscribers) {
-    const settings = getUserSettings(userId);
-    if (severityRank(alert.severity) >= severityRank(settings.minSeverity)) {
+  const sends = subscribers
+    .filter((userId) => {
+      const settings = getUserSettings(userId);
+      return severityRank(alert.severity) >= severityRank(settings.minSeverity);
+    })
+    .map(async (userId) => {
       try {
         await bot.api.sendMessage(userId, message, { parse_mode: "HTML" });
         incrementAlertCount(userId, alert.fixtureId);
-      } catch (err) {
-        logger.error("delivery", `Failed to send to ${userId}: ${(err as Error).message}`);
+      } catch (err: any) {
+        if (err?.error_code === 403) {
+          logger.warn("delivery", `User ${userId} blocked bot — removing watch for fixture ${alert.fixtureId}`);
+          unsubscribeWatch(userId, alert.fixtureId);
+        } else {
+          logger.error("delivery", `Failed to send to ${userId}: ${(err as Error).message}`);
+        }
       }
-    }
-  }
+    });
+  await Promise.allSettled(sends);
 
   logAlert(alert.fixtureId, alert.type, alert.severity, alert.title, message, alert.data);
 }
@@ -70,19 +79,36 @@ async function deliverMatchEvent(signal: import("./engine/event-tracker").EventS
   });
 
   const subscribers = getSubscribersForFixture(signal.fixtureId);
-  for (const userId of subscribers) {
+  await Promise.allSettled(subscribers.map(async (userId) => {
     try {
       await bot.api.sendMessage(userId, message, { parse_mode: "HTML" });
-    } catch (err) {
-      logger.error("delivery", `Failed to send event to ${userId}: ${(err as Error).message}`);
+    } catch (err: any) {
+      if (err?.error_code === 403) {
+        logger.warn("delivery", `User ${userId} blocked bot — removing watch for fixture ${signal.fixtureId}`);
+        unsubscribeWatch(userId, signal.fixtureId);
+      } else {
+        logger.error("delivery", `Failed to send event to ${userId}: ${(err as Error).message}`);
+      }
     }
+  }));
+}
+
+function stopStreamsForFixture(fixtureId: number): void {
+  const streams = activeStreams.get(fixtureId);
+  if (streams?.scores) {
+    streams.scores.stop();
+    streams.odds.stop();
+  }
+  if (activeStreams.has(fixtureId)) {
+    activeStreams.delete(fixtureId);
+    logger.info("streams", `Stopped streams for fixture ${fixtureId}`);
   }
 }
 
 function startStreamsForFixture(fixtureId: number): void {
   if (activeStreams.has(fixtureId)) return;
   if (globalStreamsStarted) {
-    activeStreams.add(fixtureId);
+    activeStreams.set(fixtureId, null);
     return;
   }
   if (!config.txoddsJwt || !config.txoddsApiToken) {
@@ -90,7 +116,6 @@ function startStreamsForFixture(fixtureId: number): void {
     return;
   }
 
-  activeStreams.add(fixtureId);
   logger.info("streams", `Starting streams for fixture ${fixtureId}`);
 
   const scoresStream = createScoresStream({
@@ -105,10 +130,15 @@ function startStreamsForFixture(fixtureId: number): void {
     fixtureId,
   });
 
+  activeStreams.set(fixtureId, { scores: scoresStream, odds: oddsStream });
+
   scoresStream.on("data", (scoreEvent) => {
     const eventSignals = eventTracker.processScoreUpdate(scoreEvent);
     for (const sig of eventSignals) {
       deliverMatchEvent(sig).catch((e) => logger.error("event-delivery", e.message));
+      if (sig.type === "phase_change" && sig.to === "F") {
+        stopStreamsForFixture(fixtureId);
+      }
     }
     if (eventSignals.length > 0) {
       divergenceDetector.verifyEdgesFromEvents(eventSignals);
@@ -121,8 +151,8 @@ function startStreamsForFixture(fixtureId: number): void {
 
   oddsStream.on("data", (oddsUpdate) => {
     const oddsSignals = oddsTracker.processOddsUpdate(oddsUpdate);
-    divergenceDetector.verifyEdges(oddsSignals);
     if (oddsSignals.length > 0) {
+      divergenceDetector.verifyEdges(oddsSignals);
       const alerts = divergenceDetector.processOddsSignals(oddsSignals);
       for (const alert of alerts) {
         deliverAlert(alert).catch((e) => logger.error("alert-delivery", e.message));
@@ -166,6 +196,12 @@ async function main(): Promise<void> {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ status: "ok", activeStreams: activeStreams.size }));
     } else if (req.url === "/api/alerts") {
+      const token = req.headers["x-api-token"];
+      if (config.txoddsApiToken && token !== config.txoddsApiToken) {
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Unauthorized" }));
+        return;
+      }
       const db = getDb();
       const alerts = (db.alerts || []).slice(-50).reverse();
       res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
@@ -228,8 +264,8 @@ async function main(): Promise<void> {
 
     globalOdds.on("data", (oddsUpdate) => {
       const signals = oddsTracker.processOddsUpdate(oddsUpdate);
-      divergenceDetector.verifyEdges(signals);
       if (signals.length > 0) {
+        divergenceDetector.verifyEdges(signals);
         const alerts = divergenceDetector.processOddsSignals(signals);
         for (const alert of alerts) deliverAlert(alert).catch((e) => logger.error("alert-delivery", e.message));
       }

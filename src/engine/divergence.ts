@@ -149,13 +149,14 @@ export class DivergenceDetector {
   }
 
   private prune(): void {
-    const cutoff = Date.now() - 120_000;
-    this.recentOddsSignals = this.recentOddsSignals.filter((s) => s._ts > cutoff);
-    this.recentEventSignals = this.recentEventSignals.filter((s) => s._ts > cutoff);
+    const signalCutoff = Date.now() - 120_000;
+    const cooldownCutoff = Date.now() - 180_000;
+    this.recentOddsSignals = this.recentOddsSignals.filter((s) => s._ts > signalCutoff);
+    this.recentEventSignals = this.recentEventSignals.filter((s) => s._ts > signalCutoff);
 
     if (this.alertCooldowns.size > 500) {
       for (const [key, ts] of this.alertCooldowns) {
-        if (ts < cutoff) this.alertCooldowns.delete(key);
+        if (ts < cooldownCutoff) this.alertCooldowns.delete(key);
       }
     }
   }

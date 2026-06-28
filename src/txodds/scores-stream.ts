@@ -4,7 +4,7 @@ import { logger } from "../utils/logger";
 import type { ScoreEvent, RawScorePayload, SoccerStatus, PossessionType } from "./types";
 
 const STATUS_MAP: Record<number, SoccerStatus> = {
-  1: "H1", 2: "HT", 3: "H2", 4: "H2", 5: "F",
+  1: "H1", 2: "HT", 3: "H2", 4: "H2", 5: "F", 6: "ET1", 7: "ET2", 8: "PE",
 };
 
 const POSSESSION_MAP: Record<string, PossessionType> = {
@@ -67,11 +67,17 @@ export interface ScoresStreamOptions {
   fixtureId?: number;
 }
 
-export function createScoresStream(opts: ScoresStreamOptions): EventEmitter {
-  const emitter = new EventEmitter();
+export interface StoppableEmitter extends EventEmitter {
+  stop(): void;
+}
+
+export function createScoresStream(opts: ScoresStreamOptions): StoppableEmitter {
+  const emitter = new EventEmitter() as StoppableEmitter;
   let stopped = false;
   let backoffMs = 3000;
   const MAX_BACKOFF = 60_000;
+
+  emitter.stop = () => { stopped = true; };
 
   async function connect() {
     const url = opts.fixtureId

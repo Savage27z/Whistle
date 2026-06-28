@@ -131,6 +131,7 @@ SOLANA_RPC_URL=https://api.devnet.solana.com
 | `/watch` | Pick a live match to monitor |
 | `/watchall` | Watch all matches at once |
 | `/unwatch` | Stop watching a match (inline buttons) |
+| `/unwatchall` | Stop watching all matches at once |
 | `/live` | View your watched matches with scores |
 | `/alerts` | Recent divergence alerts |
 | `/briefing` | Pre-match market overview with consensus odds |

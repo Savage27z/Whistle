@@ -22,11 +22,17 @@ export interface OddsStreamOptions {
   fixtureId?: number;
 }
 
-export function createOddsStream(opts: OddsStreamOptions): EventEmitter {
-  const emitter = new EventEmitter();
+export interface StoppableEmitter extends EventEmitter {
+  stop(): void;
+}
+
+export function createOddsStream(opts: OddsStreamOptions): StoppableEmitter {
+  const emitter = new EventEmitter() as StoppableEmitter;
   let stopped = false;
   let backoffMs = 3000;
   const MAX_BACKOFF = 60_000;
+
+  emitter.stop = () => { stopped = true; };
 
   async function connect() {
     const url = opts.fixtureId

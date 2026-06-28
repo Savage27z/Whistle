@@ -4,6 +4,7 @@ import {
   ensureUser,
   subscribeWatch,
   unsubscribeWatch,
+  unsubscribeAll,
   getUserWatchList,
   getRecentAlerts,
   getUserSettings,
@@ -30,6 +31,7 @@ export function setupCommands(
     { command: "watch", description: "Pick a live match to monitor" },
     { command: "watchall", description: "Watch all matches at once" },
     { command: "unwatch", description: "Stop watching a match" },
+    { command: "unwatchall", description: "Stop watching all matches" },
     { command: "live", description: "View your watched matches" },
     { command: "alerts", description: "Recent divergence alerts" },
     { command: "settings", description: "Configure alert severity" },
@@ -57,6 +59,7 @@ export function setupCommands(
         `/watch — Pick a match to monitor\n` +
         `/watchall — Watch all matches at once\n` +
         `/unwatch — Stop monitoring\n` +
+        `/unwatchall — Stop all monitoring\n` +
         `/live — Your active matches\n` +
         `/alerts — Recent alerts\n` +
         `/briefing — Pre-match market overview\n` +
@@ -227,6 +230,17 @@ export function setupCommands(
     await ctx.editMessageText(`Stopped watching <b>${escHtml(label)}</b>.`, { parse_mode: "HTML" });
   });
 
+  bot.command("unwatchall", async (ctx) => {
+    const userId = ctx.from?.id;
+    if (!userId) return;
+
+    const count = unsubscribeAll(userId);
+    if (count === 0) {
+      return ctx.reply("You're not watching any matches.");
+    }
+    await ctx.reply(`✅ Stopped watching all ${count} match${count === 1 ? "" : "es"}.`);
+  });
+
   bot.command("live", async (ctx) => {
     const userId = ctx.from?.id;
     if (!userId) return;
@@ -321,7 +335,7 @@ export function setupCommands(
 
     const edge = divergenceDetector.getEdgeStats();
 
-    let msg = `<b>Whistle Stats</b>\n\nTotal alerts: ${alerts.length}\n\n`;
+    let msg = `<b>Whistle Stats</b>\n\nRecent alerts (last 100): ${alerts.length}\n\n`;
 
     if (edge.total > 0) {
       msg += `<b>Edge tracker:</b>\n`;
@@ -340,10 +354,10 @@ export function setupCommands(
     }
 
     const typeLabels: Record<string, string> = {
-      silent_odds_shift: "Silent Odds Shift",
+      silent_odds_shift: "Silent Odds Shift / Collapse",
       delayed_market_reaction: "Delayed Market Reaction",
       momentum_mispricing: "Momentum Mispricing",
-      value_spot: "Value Spot / Disagreement",
+      value_spot: "Goal Imminent / Disagreement",
     };
     msg += `<b>By type:</b>\n`;
     for (const [type, count] of Object.entries(byType)) {
@@ -578,7 +592,12 @@ Rules:
     for (const a of matchAlerts) {
       const time = new Date(a.created_at * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "UTC" }) + " UTC";
       const sevEmoji = a.severity === "critical" ? "🔴" : a.severity === "high" ? "🟠" : a.severity === "medium" ? "🟡" : "⚪";
-      msg += `${sevEmoji} <b>${escHtml(a.title)}</b> — ${escHtml(time)}\n`;
+      const line = `${sevEmoji} <b>${escHtml(a.title)}</b> — ${escHtml(time)}\n`;
+      if (msg.length + line.length > 4000) {
+        msg += `\n...and ${matchAlerts.length - matchAlerts.indexOf(a)} more`;
+        break;
+      }
+      msg += line;
     }
 
     await ctx.reply(msg, { parse_mode: "HTML" });
