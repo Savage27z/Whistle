@@ -43,7 +43,7 @@ export function setupCommands(
         `🟠 <b>Delayed Market Reaction</b> — A goal, red card, or penalty happens but odds haven't adjusted within 10s. The market is slow.\n\n` +
         `🟡 <b>Momentum Mispricing</b> — Sustained attacking pressure (3+ danger possessions) but odds haven't shortened. Goal probability is underpriced.\n\n` +
         `🟡 <b>Goal Imminent</b> — TxODDS signals an imminent goal but Over/BTTS market hasn't tightened.\n\n` +
-        `⚪ <b>Bookmaker Disagreement</b> — 15%+ spread across bookmakers on the same market. Someone knows something.\n\n` +
+        `⚪ <b>Bookmaker Disagreement</b> — 20%+ spread across 3+ bookmakers on the same market. Someone knows something.\n\n` +
         `<b>Match events:</b> You'll also receive instant alerts for goals ⚽, red cards 🟥, penalties ⚠️, and VAR reviews 📺.\n\n` +
         `<b>Commands:</b>\n` +
         `/watch — Pick a match to monitor\n` +

@@ -51,21 +51,24 @@ export class OddsTracker {
 
       const velocity = this.calculateVelocity(history, 60_000);
 
-      if (Math.abs(velocity) > 0.10) {
+      const velocityThreshold = update.inRunning ? 0.10 : 0.20;
+      if (Math.abs(velocity) > velocityThreshold) {
         const bookmakerCount = this.countMovingBookmakers(fixtureState, update.oddsType, priceName, 60_000);
-        signals.push({
-          type: "sharp_movement",
-          fixtureId: update.fixtureId,
-          market: marketKey,
-          velocity,
-          currentValue: price,
-          bookmakerCount,
-          ts: update.ts,
-        });
+        if (bookmakerCount >= 2) {
+          signals.push({
+            type: "sharp_movement",
+            fixtureId: update.fixtureId,
+            market: marketKey,
+            velocity,
+            currentValue: price,
+            bookmakerCount,
+            ts: update.ts,
+          });
+        }
       }
 
       const spread = this.calculateSpread(fixtureState, update.oddsType, priceName);
-      if (spread > 0.15) {
+      if (spread > 0.20) {
         signals.push({
           type: "bookmaker_disagreement",
           fixtureId: update.fixtureId,
@@ -154,7 +157,7 @@ export class OddsTracker {
       if (!key.endsWith(suffix) || history.length === 0) continue;
       latestValues.push(history[history.length - 1].value);
     }
-    if (latestValues.length < 2) return 0;
+    if (latestValues.length < 3) return 0;
     const min = Math.min(...latestValues);
     const max = Math.max(...latestValues);
     if (min === 0) return 0;

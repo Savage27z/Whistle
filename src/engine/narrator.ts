@@ -6,7 +6,9 @@ import type { MatchState } from "./event-tracker";
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
 let lastApiCall = 0;
-const MIN_API_INTERVAL_MS = 5000;
+let apiBackoffMs = 30_000;
+const BASE_API_INTERVAL_MS = 30_000;
+const MAX_API_BACKOFF_MS = 300_000;
 
 export function escHtml(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -23,7 +25,7 @@ function severityEmoji(severity: string): string {
 
 export async function narrateAlert(alert: DivergenceAlert, matchState?: MatchState): Promise<string> {
   const now = Date.now();
-  if (now - lastApiCall < MIN_API_INTERVAL_MS) {
+  if (now - lastApiCall < apiBackoffMs) {
     return formatFallback(alert, matchState);
   }
   if (!config.openrouterApiKey) return formatFallback(alert, matchState);
@@ -66,9 +68,16 @@ Rules:
     });
 
     if (!res.ok) {
-      logger.error("narrator", `OpenRouter error: ${res.status}`);
+      if (res.status === 429) {
+        apiBackoffMs = Math.min(apiBackoffMs * 2, MAX_API_BACKOFF_MS);
+        logger.warn("narrator", `OpenRouter 429 — backing off to ${Math.round(apiBackoffMs / 1000)}s`);
+      } else {
+        logger.error("narrator", `OpenRouter error: ${res.status}`);
+      }
       return formatFallback(alert, matchState);
     }
+
+    apiBackoffMs = BASE_API_INTERVAL_MS;
 
     const data = (await res.json()) as { choices: { message: { content: string } }[] };
     const raw = data.choices?.[0]?.message?.content;
