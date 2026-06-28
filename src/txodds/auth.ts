@@ -1,4 +1,4 @@
-import { ENDPOINTS } from "./constants";
+import { ENDPOINTS, TXODDS_BASE_URL } from "./constants";
 import { logger } from "../utils/logger";
 
 export interface AuthTokens {
@@ -20,13 +20,13 @@ export async function activateToken(
   walletSignature: string,
   leagues: number[]
 ): Promise<string> {
-  const res = await fetch(`${ENDPOINTS.authGuestStart.replace("/start", "/activate")}`, {
+  const res = await fetch(`${TXODDS_BASE_URL}/api/token/activate`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${jwt}`,
     },
-    body: JSON.stringify({ txSignature, walletSignature, leagues }),
+    body: JSON.stringify({ txSig: txSignature, walletSignature, leagues }),
   });
   if (!res.ok) throw new Error(`Token activation failed: ${res.status}`);
   const body = (await res.json()) as { apiToken: string };

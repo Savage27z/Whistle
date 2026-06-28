@@ -77,8 +77,8 @@ export class EventTracker {
         });
       }
     } else if (update.possessionType) {
-      state.dangerSequence = 0;
-      state.dangerTeam = null;
+      if (state.dangerSequence > 0) state.dangerSequence--;
+      if (state.dangerSequence === 0) state.dangerTeam = null;
     }
 
     // Goal imminent

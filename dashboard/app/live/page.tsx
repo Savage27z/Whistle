@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 
 interface Alert {
   id: number;
@@ -20,15 +20,18 @@ const SEVERITY_COLORS: Record<string, string> = {
 };
 
 const SEVERITY_EMOJI: Record<string, string> = {
-  critical: "🔴",
-  high: "🟠",
-  medium: "🟡",
+  critical: "\u{1F534}",
+  high: "\u{1F7E0}",
+  medium: "\u{1F7E1}",
   low: "⚪",
 };
 
 export default function LiveDashboard() {
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [connected, setConnected] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const prevCountRef = useRef(0);
+  const topRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     async function fetchAlerts() {
@@ -36,11 +39,17 @@ export default function LiveDashboard() {
         const res = await fetch("/api/alerts");
         if (res.ok) {
           const data = await res.json();
+          if (data.length > prevCountRef.current && prevCountRef.current > 0) {
+            topRef.current?.scrollIntoView({ behavior: "smooth" });
+          }
+          prevCountRef.current = data.length;
           setAlerts(data);
           setConnected(true);
         }
       } catch {
         setConnected(false);
+      } finally {
+        setLoading(false);
       }
     }
 
@@ -53,8 +62,20 @@ export default function LiveDashboard() {
     <div style={{ minHeight: "100vh", padding: 24, maxWidth: 1000, margin: "0 auto" }}>
       <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 32 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <a href="/" style={{ fontSize: 28, textDecoration: "none" }}>⚽</a>
+          <a href="/" style={{ fontSize: 28, textDecoration: "none" }}>{"⚽"}</a>
           <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0, color: "#fff" }}>Whistle Live</h1>
+          {alerts.length > 0 && (
+            <span style={{
+              fontSize: 12,
+              padding: "2px 8px",
+              borderRadius: 10,
+              background: "#1a1a1a",
+              color: "#a3a3a3",
+              border: "1px solid #333",
+            }}>
+              {alerts.length} alert{alerts.length !== 1 ? "s" : ""}
+            </span>
+          )}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <div
@@ -63,23 +84,31 @@ export default function LiveDashboard() {
               height: 8,
               borderRadius: "50%",
               background: connected ? "#22c55e" : "#ef4444",
+              animation: connected ? "pulse 2s infinite" : "none",
             }}
           />
           <span style={{ fontSize: 14, color: "#737373" }}>
-            {connected ? "Connected" : "Disconnected"}
+            {loading ? "Connecting..." : connected ? "Connected" : "Disconnected"}
           </span>
         </div>
       </header>
 
-      {alerts.length === 0 ? (
+      <div ref={topRef} />
+
+      {loading ? (
         <div style={{ textAlign: "center", padding: "80px 0", color: "#525252" }}>
-          <div style={{ fontSize: 48, marginBottom: 16 }}>📡</div>
+          <div style={{ fontSize: 48, marginBottom: 16, animation: "pulse 1.5s infinite" }}>{"\u{1F4E1}"}</div>
+          <p style={{ fontSize: 18 }}>Connecting to Whistle...</p>
+        </div>
+      ) : alerts.length === 0 ? (
+        <div style={{ textAlign: "center", padding: "80px 0", color: "#525252" }}>
+          <div style={{ fontSize: 48, marginBottom: 16 }}>{"\u{1F4E1}"}</div>
           <p style={{ fontSize: 18 }}>No alerts yet. Watch a live match via the Telegram bot to see alerts here.</p>
           <p style={{ fontSize: 14, marginTop: 8 }}>Alerts will appear here in real-time when divergences are detected.</p>
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {alerts.map((alert) => (
+          {alerts.map((alert, i) => (
             <div
               key={alert.id}
               style={{
@@ -88,6 +117,7 @@ export default function LiveDashboard() {
                 padding: 20,
                 border: "1px solid #222",
                 borderLeft: `4px solid ${SEVERITY_COLORS[alert.severity] || "#333"}`,
+                animation: i === 0 ? "fadeIn 0.3s ease-in" : "none",
               }}
             >
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
@@ -119,6 +149,17 @@ export default function LiveDashboard() {
           ))}
         </div>
       )}
+
+      <style>{`
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.5; }
+        }
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(-8px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
     </div>
   );
 }

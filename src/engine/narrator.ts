@@ -21,16 +21,19 @@ export async function narrateAlert(alert: DivergenceAlert, matchState?: MatchSta
   const minute = matchState?.minute || "?";
   const phase = matchState?.phase || "?";
 
-  const prompt = `You are Whistle, a sharp sports trading intelligence bot. Write a concise Telegram alert (max 4 lines) for this signal. Be direct, use trading language, include the key numbers. No fluff.
+  const prompt = `You are Whistle, an AI sports trading intelligence agent. Write a Telegram alert (max 5 lines, plain text only — no markdown).
 
-Match: ${team1} vs ${team2} | Score: ${score} | Minute: ${minute}' | Phase: ${phase}
+Match: ${team1} vs ${team2} | ${score} | ${minute}' | ${phase}
+Signal: ${alert.type} (${alert.severity})
+Details: ${alert.description}
 
-Alert type: ${alert.type}
-Severity: ${alert.severity}
-Raw description: ${alert.description}
-Data: ${JSON.stringify(alert.data)}
-
-Format: Use emoji prefix based on severity (🔴 critical, 🟠 high, 🟡 medium, ⚪ low). First line is the headline. Rest is the actionable insight. End with the implied trading angle if obvious.`;
+Rules:
+- Line 1: emoji + bold headline (use 🔴/🟠/🟡/⚪ for critical/high/medium/low)
+- Line 2: match context (teams, score, minute)
+- Line 3-4: what happened and why it matters for trading
+- Line 5: specific trading angle (e.g. "Look at Over 2.5 before it shortens" or "Back [team] at current price")
+- Be specific with numbers. Say "odds moved 12% in 40s" not "odds shifted"
+- Never use generic phrases like "keep an eye on" or "worth monitoring"`;
 
   try {
     lastApiCall = Date.now();

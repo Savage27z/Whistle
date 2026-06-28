@@ -161,11 +161,17 @@ export class DivergenceDetector {
       });
     }
 
-    // Apply cooldowns
+    const cooldownMs: Record<Severity, number> = {
+      critical: 60_000,
+      high: 120_000,
+      medium: 180_000,
+      low: 180_000,
+    };
+
     const filtered = alerts.filter((a) => {
       const key = `${a.fixtureId}:${a.type}`;
       const lastSent = this.alertCooldowns.get(key) || 0;
-      if (now - lastSent < 180_000) return false;
+      if (now - lastSent < cooldownMs[a.severity]) return false;
       this.alertCooldowns.set(key, now);
       return true;
     });
