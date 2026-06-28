@@ -1,10 +1,11 @@
 import type { MatchState } from "../engine/event-tracker";
+import { escHtml } from "../engine/narrator";
 
 export function formatMatchLine(state: MatchState, alertCount: number): string {
   const phaseLabel = formatPhase(state.phase);
   return (
-    `⚽ *${escMd(state.team1)}* ${state.score[0]}-${state.score[1]} *${escMd(state.team2)}*` +
-    ` | ${state.minute}' ${phaseLabel}\n` +
+    `⚽ <b>${escHtml(state.team1)}</b> ${state.score[0]}-${state.score[1]} <b>${escHtml(state.team2)}</b>` +
+    ` | ${state.minute}' ${escHtml(phaseLabel)}\n` +
     `   Alerts sent: ${alertCount}`
   );
 }
@@ -21,8 +22,4 @@ export function formatPhase(phase: string): string {
     case "PE": return "Penalties";
     default: return phase;
   }
-}
-
-export function escMd(text: string): string {
-  return text.replace(/([_*\[\]()~`>#+\-=|{}.!])/g, "\\$1");
 }

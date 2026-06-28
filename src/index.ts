@@ -5,8 +5,7 @@ import { OddsTracker } from "./engine/odds-tracker";
 import { EventTracker } from "./engine/event-tracker";
 import { DivergenceDetector, severityRank } from "./engine/divergence";
 import type { DivergenceAlert } from "./engine/divergence";
-import type { MatchState } from "./engine/event-tracker";
-import { narrateAlert } from "./engine/narrator";
+import { narrateAlert, formatMatchEvent } from "./engine/narrator";
 import { createScoresStream } from "./txodds/scores-stream";
 import { createOddsStream } from "./txodds/odds-stream";
 import { getSubscribersForFixture, getUserSettings, incrementAlertCount, logAlert } from "./db/queries";
@@ -19,8 +18,11 @@ const oddsTracker = new OddsTracker();
 const eventTracker = new EventTracker();
 const divergenceDetector = new DivergenceDetector();
 const activeStreams = new Set<number>();
+let globalStreamsStarted = false;
 
 let bot: Bot;
+
+const MAJOR_EVENTS = new Set(["goal", "red_card", "penalty", "var_review"]);
 
 async function deliverAlert(alert: DivergenceAlert): Promise<void> {
   const matchState = eventTracker.getMatchState(alert.fixtureId);
@@ -32,7 +34,7 @@ async function deliverAlert(alert: DivergenceAlert): Promise<void> {
     const settings = getUserSettings(userId);
     if (severityRank(alert.severity) >= severityRank(settings.minSeverity)) {
       try {
-        await bot.api.sendMessage(userId, message, { parse_mode: "Markdown" });
+        await bot.api.sendMessage(userId, message, { parse_mode: "HTML" });
         incrementAlertCount(userId, alert.fixtureId);
       } catch (err) {
         logger.error("delivery", `Failed to send to ${userId}: ${(err as Error).message}`);
@@ -43,10 +45,36 @@ async function deliverAlert(alert: DivergenceAlert): Promise<void> {
   logAlert(alert.fixtureId, alert.type, alert.severity, alert.title, message, alert.data);
 }
 
+async function deliverMatchEvent(signal: import("./engine/event-tracker").EventSignal): Promise<void> {
+  if (!MAJOR_EVENTS.has(signal.type)) return;
+  const matchState = eventTracker.getMatchState(signal.fixtureId);
+  if (!matchState) return;
+
+  const message = formatMatchEvent(signal.type, matchState, {
+    team: signal.team,
+    minute: signal.minute,
+    goalType: signal.goalType,
+    newScore: signal.newScore,
+  });
+
+  const subscribers = getSubscribersForFixture(signal.fixtureId);
+  for (const userId of subscribers) {
+    try {
+      await bot.api.sendMessage(userId, message, { parse_mode: "HTML" });
+    } catch (err) {
+      logger.error("delivery", `Failed to send event to ${userId}: ${(err as Error).message}`);
+    }
+  }
+}
+
 function startStreamsForFixture(fixtureId: number): void {
   if (activeStreams.has(fixtureId)) return;
+  if (globalStreamsStarted) {
+    activeStreams.add(fixtureId);
+    return;
+  }
   if (!config.txoddsJwt || !config.txoddsApiToken) {
-    logger.warn("streams", "No TxODDS credentials — streams won't connect. Set TXODDS_JWT and TXODDS_API_TOKEN.");
+    logger.warn("streams", "No TxODDS credentials — streams won't connect.");
     return;
   }
 
@@ -67,10 +95,13 @@ function startStreamsForFixture(fixtureId: number): void {
 
   scoresStream.on("data", (scoreEvent) => {
     const eventSignals = eventTracker.processScoreUpdate(scoreEvent);
+    for (const sig of eventSignals) {
+      deliverMatchEvent(sig).catch((e) => logger.error("event-delivery", e.message));
+    }
     if (eventSignals.length > 0) {
       const alerts = divergenceDetector.processEventSignals(eventSignals);
       for (const alert of alerts) {
-        deliverAlert(alert);
+        deliverAlert(alert).catch((e) => logger.error("alert-delivery", e.message));
       }
     }
   });
@@ -80,24 +111,31 @@ function startStreamsForFixture(fixtureId: number): void {
     if (oddsSignals.length > 0) {
       const alerts = divergenceDetector.processOddsSignals(oddsSignals);
       for (const alert of alerts) {
-        deliverAlert(alert);
+        deliverAlert(alert).catch((e) => logger.error("alert-delivery", e.message));
       }
     }
   });
+
+  scoresStream.on("error", (err: Error) => logger.error("scores-stream", err.message));
+  oddsStream.on("error", (err: Error) => logger.error("odds-stream", err.message));
 }
 
 async function main(): Promise<void> {
   validateConfig();
-  getDb(); // initialize database
+  getDb();
 
-  bot = createBot(eventTracker, async (fixtureId) => {
-    try {
-      const fixtures = await fetchFixtures();
-      const f = fixtures.find((fx) => fx.fixtureId === fixtureId);
-      if (f) eventTracker.setMatchInfo(fixtureId, f.team1, f.team2);
-    } catch {}
-    startStreamsForFixture(fixtureId);
-  });
+  bot = createBot(
+    eventTracker,
+    async (fixtureId) => {
+      try {
+        const fixtures = await fetchFixtures();
+        const f = fixtures.find((fx) => fx.fixtureId === fixtureId);
+        if (f) eventTracker.setMatchInfo(fixtureId, f.team1, f.team2);
+      } catch {}
+      startStreamsForFixture(fixtureId);
+    },
+    () => ({ active: activeStreams.size, globalConnected: globalStreamsStarted }),
+  );
 
   bot.start({
     drop_pending_updates: true,
@@ -106,14 +144,12 @@ async function main(): Promise<void> {
     },
   });
 
-  // Health check server for Railway
   const port = process.env.PORT || 3000;
   const server = http.createServer((req, res) => {
     if (req.url === "/health" || req.url === "/") {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ status: "ok", activeStreams: activeStreams.size }));
     } else if (req.url === "/api/alerts") {
-      const { getDb } = require("./db/schema");
       const db = getDb();
       const alerts = (db.alerts || []).slice(-50).reverse();
       res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
@@ -132,8 +168,8 @@ async function main(): Promise<void> {
     process.exit(0);
   });
 
-  // If TxODDS credentials are set, also start global streams
   if (config.txoddsJwt && config.txoddsApiToken) {
+    globalStreamsStarted = true;
     logger.info("main", "Starting global TxODDS streams");
 
     const globalScores = createScoresStream({
@@ -148,9 +184,12 @@ async function main(): Promise<void> {
 
     globalScores.on("data", (scoreEvent) => {
       const signals = eventTracker.processScoreUpdate(scoreEvent);
+      for (const sig of signals) {
+        deliverMatchEvent(sig).catch((e) => logger.error("event-delivery", e.message));
+      }
       if (signals.length > 0) {
         const alerts = divergenceDetector.processEventSignals(signals);
-        for (const alert of alerts) deliverAlert(alert);
+        for (const alert of alerts) deliverAlert(alert).catch((e) => logger.error("alert-delivery", e.message));
       }
     });
 
@@ -158,9 +197,12 @@ async function main(): Promise<void> {
       const signals = oddsTracker.processOddsUpdate(oddsUpdate);
       if (signals.length > 0) {
         const alerts = divergenceDetector.processOddsSignals(signals);
-        for (const alert of alerts) deliverAlert(alert);
+        for (const alert of alerts) deliverAlert(alert).catch((e) => logger.error("alert-delivery", e.message));
       }
     });
+
+    globalScores.on("error", (err: Error) => logger.error("global-scores", err.message));
+    globalOdds.on("error", (err: Error) => logger.error("global-odds", err.message));
   }
 }
 

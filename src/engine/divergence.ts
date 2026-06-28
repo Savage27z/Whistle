@@ -48,6 +48,12 @@ export class DivergenceDetector {
     const cutoff = Date.now() - 120_000;
     this.recentOddsSignals = this.recentOddsSignals.filter((s) => s._ts > cutoff);
     this.recentEventSignals = this.recentEventSignals.filter((s) => s._ts > cutoff);
+
+    if (this.alertCooldowns.size > 500) {
+      for (const [key, ts] of this.alertCooldowns) {
+        if (ts < cutoff) this.alertCooldowns.delete(key);
+      }
+    }
   }
 
   private detect(now: number): DivergenceAlert[] {

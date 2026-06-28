@@ -121,12 +121,13 @@ SOLANA_RPC_URL=https://api.devnet.solana.com
 |---------|-------------|
 | `/start` | Welcome message |
 | `/watch` | Pick a live match to monitor |
-| `/unwatch <id>` | Stop watching a match |
+| `/unwatch` | Stop watching a match (inline buttons) |
 | `/live` | View your watched matches with scores |
 | `/alerts` | Recent divergence alerts |
 | `/settings` | Configure minimum alert severity |
-| `/stats` | Alert breakdown by type |
-| `/help` | How Whistle works |
+| `/stats` | Alert breakdown by type and severity |
+| `/status` | Connection health and stream diagnostics |
+| `/help` | How Whistle works (all 6 patterns) |
 
 ## How the divergence engine works
 
@@ -135,7 +136,8 @@ The core insight: **odds and events should move together**. When they diverge, t
 1. **OddsTracker** processes each bookmaker's price update, calculates velocity (% change over 60s window), cross-bookmaker spread, and detects collapses
 2. **EventTracker** processes score events — goals, cards, VAR reviews, danger possessions, phase changes
 3. **DivergenceDetector** cross-correlates both signal streams within a 2-minute window to detect the 6 patterns above
-4. Alerts have a 3-minute cooldown per fixture per type to avoid spam
+4. Major match events (goals, red cards, penalties, VAR) are sent as instant notifications to all subscribers
+5. Alerts have severity-based cooldowns (critical: 60s, high: 120s, medium/low: 180s) per fixture per type
 
 ## Project structure
 

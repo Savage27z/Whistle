@@ -25,6 +25,8 @@ export interface OddsStreamOptions {
 export function createOddsStream(opts: OddsStreamOptions): EventEmitter {
   const emitter = new EventEmitter();
   let stopped = false;
+  let backoffMs = 3000;
+  const MAX_BACKOFF = 60_000;
 
   async function connect() {
     const url = opts.fixtureId
@@ -42,8 +44,18 @@ export function createOddsStream(opts: OddsStreamOptions): EventEmitter {
       },
     });
 
-    if (!response.ok) throw new Error(`Odds stream failed: ${response.status}`);
+    if (!response.ok) {
+      if (response.status === 401) {
+        logger.error("odds-stream", "JWT expired (401) — stopping reconnect. Re-run setup.");
+        stopped = true;
+        emitter.emit("error", new Error("JWT expired"));
+        return;
+      }
+      throw new Error(`Odds stream failed: ${response.status}`);
+    }
     if (!response.body) throw new Error("No response body");
+
+    backoffMs = 3000;
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
@@ -81,8 +93,11 @@ export function createOddsStream(opts: OddsStreamOptions): EventEmitter {
   function startWithReconnect() {
     if (stopped) return;
     connect().catch((err) => {
-      logger.error("odds-stream", `Error, reconnecting in 3s: ${err.message}`);
-      if (!stopped) setTimeout(startWithReconnect, 3000);
+      logger.error("odds-stream", `Error, reconnecting in ${Math.round(backoffMs / 1000)}s: ${err.message}`);
+      if (!stopped) {
+        setTimeout(startWithReconnect, backoffMs);
+        backoffMs = Math.min(backoffMs * 2, MAX_BACKOFF);
+      }
     });
   }
 

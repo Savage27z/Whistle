@@ -99,8 +99,9 @@ export class OddsTracker {
     if (!state) return null;
 
     const values: number[] = [];
+    const suffix = `:${oddsType}:${outcomeName}`;
     for (const [key, history] of state.history) {
-      if (key.includes(`:${oddsType}:${outcomeName}`) && history.length > 0) {
+      if (key.endsWith(suffix) && history.length > 0) {
         values.push(history[history.length - 1].value);
       }
     }
@@ -137,8 +138,9 @@ export class OddsTracker {
 
   private countMovingBookmakers(state: OddsState, oddsType: string, outcomeName: string, windowMs: number): number {
     let count = 0;
+    const suffix = `:${oddsType}:${outcomeName}`;
     for (const [key, history] of state.history) {
-      if (!key.includes(`:${oddsType}:${outcomeName}`)) continue;
+      if (!key.endsWith(suffix)) continue;
       const v = this.calculateVelocity(history, windowMs);
       if (Math.abs(v) > 0.05) count++;
     }
@@ -147,8 +149,9 @@ export class OddsTracker {
 
   private calculateSpread(state: OddsState, oddsType: string, outcomeName: string): number {
     const latestValues: number[] = [];
+    const suffix = `:${oddsType}:${outcomeName}`;
     for (const [key, history] of state.history) {
-      if (!key.includes(`:${oddsType}:${outcomeName}`) || history.length === 0) continue;
+      if (!key.endsWith(suffix) || history.length === 0) continue;
       latestValues.push(history[history.length - 1].value);
     }
     if (latestValues.length < 2) return 0;
