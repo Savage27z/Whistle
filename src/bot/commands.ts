@@ -28,6 +28,7 @@ export function setupCommands(
   bot.api.setMyCommands([
     { command: "start", description: "Welcome message and overview" },
     { command: "watch", description: "Pick a live match to monitor" },
+    { command: "watchall", description: "Watch all matches at once" },
     { command: "unwatch", description: "Stop watching a match" },
     { command: "live", description: "View your watched matches" },
     { command: "alerts", description: "Recent divergence alerts" },
@@ -54,6 +55,7 @@ export function setupCommands(
         `<b>Match events:</b> You'll also receive instant alerts for goals ⚽, red cards 🟥, penalties ⚠️, and VAR reviews 📺.\n\n` +
         `<b>Commands:</b>\n` +
         `/watch — Pick a match to monitor\n` +
+        `/watchall — Watch all matches at once\n` +
         `/unwatch — Stop monitoring\n` +
         `/live — Your active matches\n` +
         `/alerts — Recent alerts\n` +
@@ -83,6 +85,7 @@ export function setupCommands(
         `🎯 Confidence score — how certain the signal is\n` +
         `📊 Live odds snapshot — per-bookmaker prices + direction\n\n` +
         `Plus instant match event alerts: goals, red cards, penalties, VAR.\n\n` +
+        `🔗 Powered by on-chain Solana subscription (Token-2022, devnet)\n\n` +
         `<b>Quick start:</b>\n` +
         `/briefing — See today's matches + market overview\n` +
         `/watch — Pick a match to monitor\n` +
@@ -147,6 +150,37 @@ export function setupCommands(
       `✅ Now watching <b>${escHtml(label)}</b>. I'll alert you when I spot something.\n\nUse /unwatch to stop.`,
       { parse_mode: "HTML" }
     );
+  });
+
+  bot.command("watchall", async (ctx) => {
+    const userId = ctx.from?.id;
+    if (!userId) return;
+    ensureUser(userId, ctx.from?.username);
+
+    try {
+      const fixtures = await fetchFixtures();
+      if (fixtures.length === 0) {
+        return ctx.reply("No World Cup matches available right now.");
+      }
+
+      let count = 0;
+      for (const f of fixtures) {
+        subscribeWatch(userId, f.fixtureId);
+        onWatch(f.fixtureId);
+        count++;
+      }
+
+      const matchList = fixtures.slice(0, 5).map((f) => `  ⚽ ${escHtml(f.team1)} vs ${escHtml(f.team2)}`).join("\n");
+      const more = fixtures.length > 5 ? `\n  ...and ${fixtures.length - 5} more` : "";
+
+      await ctx.reply(
+        `✅ Now watching <b>all ${count} matches</b>:\n\n${matchList}${more}\n\nI'll alert you when I spot opportunities. Use /unwatch to stop.`,
+        { parse_mode: "HTML" }
+      );
+    } catch (err) {
+      logger.error("bot", `Watchall failed: ${(err as Error).message}`);
+      await ctx.reply("Couldn't fetch matches. Try again later.");
+    }
   });
 
   bot.command("unwatch", async (ctx) => {
@@ -223,8 +257,11 @@ export function setupCommands(
 
     let msg = "<b>Recent Alerts:</b>\n\n";
     for (const a of alerts) {
-      const time = new Date(a.created_at * 1000).toLocaleTimeString();
-      msg += `${a.message}\n<i>${escHtml(time)}</i>\n\n`;
+      const time = new Date(a.created_at * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      const sevEmoji = a.severity === "critical" ? "🔴" : a.severity === "high" ? "🟠" : a.severity === "medium" ? "🟡" : "⚪";
+      const state = eventTracker.getMatchState(a.fixture_id);
+      const match = state ? `${escHtml(state.team1)} vs ${escHtml(state.team2)}` : `Fixture ${a.fixture_id}`;
+      msg += `${sevEmoji} <b>${escHtml(a.title)}</b>\n${match} — ${escHtml(time)}\n\n`;
     }
 
     await ctx.reply(msg, { parse_mode: "HTML" });
@@ -345,7 +382,7 @@ export function setupCommands(
         if (state && state.phase !== "NS") {
           msg += `   ${state.score[0]}-${state.score[1]} | ${state.minute}'\n`;
         } else {
-          const kickoff = new Date(f.startTime * 1000);
+          const kickoff = new Date(f.startTime);
           msg += `   Kickoff: ${kickoff.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}\n`;
         }
 
@@ -378,10 +415,33 @@ export function setupCommands(
       return ctx.reply("Watch a match first with /watch, then use /predict to get an AI prediction.");
     }
 
-    const fixtureId = watching[0].fixture_id;
+    if (watching.length > 1) {
+      const keyboard = new InlineKeyboard();
+      for (const w of watching) {
+        const state = eventTracker.getMatchState(w.fixture_id);
+        const label = state ? `${state.team1} vs ${state.team2}` : `Fixture ${w.fixture_id}`;
+        keyboard.text(label, `predict:${w.fixture_id}`).row();
+      }
+      return ctx.reply("<b>Select a match to predict:</b>", { reply_markup: keyboard, parse_mode: "HTML" });
+    }
+
+    await generatePrediction(ctx, watching[0].fixture_id);
+  });
+
+  bot.callbackQuery(/^predict:(\d+)$/, async (ctx) => {
+    const fixtureId = parseInt(ctx.match![1]);
+    await ctx.answerCallbackQuery();
+    await generatePrediction(ctx, fixtureId);
+  });
+
+  async function generatePrediction(ctx: any, fixtureId: number): Promise<void> {
     const state = eventTracker.getMatchState(fixtureId);
     if (!state) {
       return ctx.reply("No match data available yet. Wait for the match to start.");
+    }
+
+    if (!config.openrouterApiKey) {
+      return ctx.reply("AI predictions require OpenRouter API key.");
     }
 
     const markets = oddsTracker.getMarketSummary(fixtureId);
@@ -391,17 +451,23 @@ export function setupCommands(
       `${m.market}: consensus ${m.consensus.toFixed(2)}, ${m.bookmakerCount} books, ${(m.spread * 100).toFixed(0)}% spread`
     ).join("\n");
 
-    if (!config.openrouterApiKey) {
-      return ctx.reply("AI predictions require OpenRouter API key.");
-    }
-
-    await ctx.reply("🔮 Generating prediction...");
+    const dangerTeamName = state.dangerTeam
+      ? (state.dangerTeam === 1 ? state.team1 : state.team2)
+      : "none";
 
     try {
-      const prompt = `You are Whistle, an AI sports trading analyst. Generate a brief match prediction based on live data (max 8 lines, plain text only, no formatting characters).
+      const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${config.openrouterApiKey}`,
+        },
+        body: JSON.stringify({
+          model: "meta-llama/llama-3.3-70b-instruct:free",
+          messages: [{ role: "user", content: `You are Whistle, an AI sports trading analyst. Generate a brief match prediction based on live data (max 8 lines, plain text only, no formatting characters).
 
 Match: ${state.team1} vs ${state.team2} | ${state.score[0]}-${state.score[1]} | ${state.minute}' | Phase: ${state.phase}
-Danger sequences: ${state.dangerSequence} (team ${state.dangerTeam || "none"})
+Danger sequences: ${state.dangerSequence} (${dangerTeamName})
 Last goal: minute ${state.lastGoalMinute || "none"}
 
 Current odds data:
@@ -415,17 +481,7 @@ Rules:
 - Lines 5-6: Predicted outcome with reasoning
 - Line 7-8: Top 1-2 trading opportunities right now
 - Be specific with odds values. Name specific markets.
-- Do NOT use any formatting characters like *, _, ~, \`, [ ]`;
-
-      const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${config.openrouterApiKey}`,
-        },
-        body: JSON.stringify({
-          model: "meta-llama/llama-3.3-70b-instruct:free",
-          messages: [{ role: "user", content: prompt }],
+- Do NOT use any formatting characters like *, _, ~, \`, [ ]` }],
           max_tokens: 350,
           temperature: 0.7,
         }),
@@ -445,7 +501,7 @@ Rules:
       logger.error("bot", `Predict failed: ${(err as Error).message}`);
       await ctx.reply("Prediction failed. Try again later.");
     }
-  });
+  }
 
   bot.command("history", async (ctx) => {
     const userId = ctx.from?.id;

@@ -76,6 +76,31 @@ export interface ScoreEvent {
   seq: number;
 }
 
+// Raw scores SSE payload (PascalCase from API)
+export interface RawScorePayload {
+  FixtureId: number;
+  Action: string;
+  StatusId?: number;
+  GameState?: string;
+  Type?: string;
+  Ts: number;
+  Seq?: number;
+  Participant?: number;
+  Score?: {
+    Participant1: ScoreSoccerTeam;
+    Participant2: ScoreSoccerTeam;
+  };
+  Data?: {
+    Goal?: boolean;
+    GoalType?: string;
+    PlayerId?: number;
+  };
+  Clock?: { Running: boolean; Seconds: number };
+  Parti1State?: { PossibleEvent?: Partial<PossibleEvent> };
+  Parti2State?: { PossibleEvent?: Partial<PossibleEvent> };
+  PossibleEvent?: Partial<PossibleEvent>;
+}
+
 export interface RawFixture {
   FixtureId: number;
   Participant1: string;

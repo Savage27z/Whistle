@@ -17,6 +17,7 @@ import http from "http";
 const oddsTracker = new OddsTracker();
 const eventTracker = new EventTracker();
 const divergenceDetector = new DivergenceDetector();
+divergenceDetector.setMatchStateResolver((id) => eventTracker.getMatchState(id));
 const activeStreams = new Set<number>();
 let globalStreamsStarted = false;
 
@@ -117,6 +118,7 @@ function startStreamsForFixture(fixtureId: number): void {
 
   oddsStream.on("data", (oddsUpdate) => {
     const oddsSignals = oddsTracker.processOddsUpdate(oddsUpdate);
+    divergenceDetector.verifyEdges(oddsSignals);
     if (oddsSignals.length > 0) {
       const alerts = divergenceDetector.processOddsSignals(oddsSignals);
       for (const alert of alerts) {
@@ -201,6 +203,13 @@ async function main(): Promise<void> {
       jwt: config.txoddsJwt,
       apiToken: config.txoddsApiToken,
     });
+
+    fetchFixtures().then((fixtures) => {
+      for (const f of fixtures) {
+        eventTracker.setMatchInfo(f.fixtureId, f.team1, f.team2);
+      }
+      logger.info("main", `Pre-loaded ${fixtures.length} fixture names`);
+    }).catch(() => {});
 
     globalScores.on("data", (scoreEvent) => {
       const signals = eventTracker.processScoreUpdate(scoreEvent);

@@ -108,7 +108,7 @@ Rules:
 export function formatMatchEvent(
   eventType: string,
   matchState: MatchState,
-  extra?: { team?: number; minute?: number; goalType?: string; newScore?: [number, number] }
+  extra?: { team?: number; minute?: number; goalType?: string; newScore?: [number, number]; from?: string; to?: string }
 ): string {
   const t1 = escHtml(matchState.team1);
   const t2 = escHtml(matchState.team2);
@@ -126,8 +126,11 @@ export function formatMatchEvent(
       return `📺 <b>VAR REVIEW</b> in progress | ${min}'\n${t1} vs ${t2}`;
     case "yellow_card":
       return `🟨 <b>Yellow Card</b> — ${teamName} | ${min}'\n${t1} vs ${t2}`;
-    case "phase_change":
-      return `🕐 <b>${escHtml(extra?.goalType || "Phase change")}</b>\n${t1} ${matchState.score[0]}-${matchState.score[1]} ${t2}`;
+    case "phase_change": {
+      const phaseLabels: Record<string, string> = { H1: "Kick Off", HT: "Half Time", H2: "Second Half", F: "Full Time", ET1: "Extra Time", ET2: "Extra Time 2nd", PE: "Penalties" };
+      const label = phaseLabels[extra?.to || ""] || extra?.to || "Phase Change";
+      return `🕐 <b>${escHtml(label)}</b>\n${t1} ${matchState.score[0]}-${matchState.score[1]} ${t2}`;
+    }
     default:
       return `📋 <b>${escHtml(eventType)}</b> | ${min}'\n${t1} vs ${t2}`;
   }

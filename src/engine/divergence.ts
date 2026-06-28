@@ -1,8 +1,8 @@
 import type { OddsSignal } from "./odds-tracker";
-import type { EventSignal } from "./event-tracker";
+import type { EventSignal, MatchState } from "./event-tracker";
 import { logger } from "../utils/logger";
 
-export type AlertType = "silent_odds_shift" | "delayed_market_reaction" | "momentum_mispricing" | "value_spot" | "odds_event_divergence";
+export type AlertType = "silent_odds_shift" | "delayed_market_reaction" | "momentum_mispricing" | "value_spot";
 export type Severity = "low" | "medium" | "high" | "critical";
 
 export interface DivergenceAlert {
@@ -38,6 +38,18 @@ export class DivergenceDetector {
   private edgeResults: EdgeResult[] = [];
   private totalAlerts = 0;
   private confirmedEdges = 0;
+  private matchStateResolver?: (fixtureId: number) => MatchState | undefined;
+
+  setMatchStateResolver(resolver: (fixtureId: number) => MatchState | undefined): void {
+    this.matchStateResolver = resolver;
+  }
+
+  private resolveTeamName(fixtureId: number, teamNum?: number): string {
+    if (!teamNum) return "Unknown";
+    const state = this.matchStateResolver?.(fixtureId);
+    if (!state) return `Team ${teamNum}`;
+    return teamNum === 1 ? state.team1 : teamNum === 2 ? state.team2 : `Team ${teamNum}`;
+  }
 
   processOddsSignals(signals: OddsSignal[]): DivergenceAlert[] {
     const now = Date.now();
@@ -196,7 +208,7 @@ export class DivergenceDetector {
           fixtureId: pressure.fixtureId,
           title: "Momentum Not Priced In",
           confidence,
-          description: `Team ${pressure.team} has had ${dangerCount} consecutive danger possessions but odds haven't shortened. Momentum suggests goal probability is higher than the market implies.`,
+          description: `${this.resolveTeamName(pressure.fixtureId, pressure.team)} has had ${dangerCount} consecutive danger possessions but odds haven't shortened. Momentum suggests goal probability is higher than the market implies.`,
           data: pressure as unknown as Record<string, unknown>,
           ts: now,
         });
@@ -210,7 +222,7 @@ export class DivergenceDetector {
       const confidence = Math.min(75, Math.round(30 + spreadPct * 2));
       alerts.push({
         type: "value_spot",
-        severity: "medium",
+        severity: "low",
         fixtureId: d.fixtureId,
         title: "Bookmaker Disagreement",
         confidence,
@@ -229,7 +241,7 @@ export class DivergenceDetector {
         fixtureId: g.fixtureId,
         title: "Goal Probability Spiking",
         confidence: 60,
-        description: `TxODDS data signals a goal is imminent for Team ${g.team}. If the Over/BTTS market hasn't tightened, there may be value.`,
+        description: `TxODDS data signals a goal is imminent for ${this.resolveTeamName(g.fixtureId, g.team)}. If the Over/BTTS market hasn't tightened, there may be value.`,
         data: g as unknown as Record<string, unknown>,
         ts: now,
       });
@@ -259,7 +271,8 @@ export class DivergenceDetector {
     };
 
     const filtered = alerts.filter((a) => {
-      const key = `${a.fixtureId}:${a.type}`;
+      const market = (a.data as any)?.market || "";
+      const key = `${a.fixtureId}:${a.type}:${market}`;
       const lastSent = this.alertCooldowns.get(key) || 0;
       if (now - lastSent < cooldownMs[a.severity]) return false;
       this.alertCooldowns.set(key, now);
