@@ -1,4 +1,5 @@
-import { Bot, InlineKeyboard } from "grammy";
+import { Bot, InlineKeyboard, InputFile } from "grammy";
+import path from "path";
 import { fetchFixtures } from "../txodds/client";
 import {
   ensureUser,
@@ -76,25 +77,32 @@ export function setupCommands(
     const userId = ctx.from?.id;
     if (userId) ensureUser(userId, ctx.from?.username);
 
-    await ctx.reply(
+    const caption =
       `⚽ <b>Welcome to Whistle</b>\n\n` +
-        `AI-powered trading intelligence for the World Cup. I watch live matches through TxODDS data feeds and alert you to opportunities in real-time.\n\n` +
-        `<b>What I detect:</b>\n` +
-        `🔴 Silent odds shifts — market moves with no visible event\n` +
-        `🟠 Delayed reactions — big events the market hasn't priced\n` +
-        `🟡 Momentum mispricing — sustained pressure not in the odds\n` +
-        `⚪ Bookmaker disagreement — some books know more\n\n` +
-        `<b>Every alert includes:</b>\n` +
-        `🎯 Confidence score — how certain the signal is\n` +
-        `📊 Live odds snapshot — per-bookmaker prices + direction\n\n` +
-        `Plus instant match event alerts: goals, red cards, penalties, VAR, kickoff/HT/FT.\n\n` +
-        `🔗 Powered by on-chain Solana subscription (Token-2022, devnet)\n\n` +
-        `<b>Quick start:</b>\n` +
-        `/briefing — See today's matches + market overview\n` +
-        `/watch — Pick a match to monitor\n` +
-        `/predict — AI match prediction`,
-      { parse_mode: "HTML" }
-    );
+      `AI-powered trading intelligence for the World Cup. I watch live matches through TxODDS data feeds and alert you to opportunities in real-time.\n\n` +
+      `<b>What I detect:</b>\n` +
+      `🔴 Silent odds shifts — market moves with no visible event\n` +
+      `🟠 Delayed reactions — big events the market hasn't priced\n` +
+      `🟡 Momentum mispricing — sustained pressure not in the odds\n` +
+      `⚪ Bookmaker disagreement — some books know more\n\n` +
+      `<b>Every alert includes:</b>\n` +
+      `🎯 Confidence score · 📊 Live odds snapshot\n\n` +
+      `Plus instant match events: goals, red cards, penalties, VAR, kickoff/HT/FT.\n\n` +
+      `🔗 Solana on-chain subscription (Token-2022, devnet)\n\n` +
+      `<b>Quick start:</b>\n` +
+      `/briefing — Today's matches + market overview\n` +
+      `/watch — Pick a match to monitor\n` +
+      `/predict — AI match prediction`;
+
+    const bannerPath = path.resolve(__dirname, "../../assets/banner.png");
+    try {
+      await ctx.replyWithPhoto(new InputFile(bannerPath), {
+        caption,
+        parse_mode: "HTML",
+      });
+    } catch {
+      await ctx.reply(caption, { parse_mode: "HTML" });
+    }
   });
 
   bot.command("watch", async (ctx) => {
