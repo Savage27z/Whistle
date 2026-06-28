@@ -147,6 +147,16 @@ export class EventTracker {
           ts: now,
         });
       }
+
+      if (d.Corner) {
+        signals.push({
+          type: "corner",
+          fixtureId: update.fixtureId,
+          team: d.Participant,
+          minute: d.Minutes,
+          ts: now,
+        });
+      }
     }
 
     // Phase change

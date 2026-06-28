@@ -14,8 +14,9 @@ function headers(): Record<string, string> {
 export async function fetchFixtures(): Promise<Fixture[]> {
   const res = await fetch(ENDPOINTS.fixturesSnapshot, { headers: headers() });
   if (!res.ok) {
-    logger.error("txodds-client", "Failed to fetch fixtures", { status: res.status });
-    return [];
+    const msg = res.status === 401 ? "JWT expired — re-run setup" : `HTTP ${res.status}`;
+    logger.error("txodds-client", `Failed to fetch fixtures: ${msg}`);
+    throw new Error(`TxODDS API error: ${msg}`);
   }
   const body = (await res.json()) as RawFixture[];
   const raw = Array.isArray(body) ? body : [];

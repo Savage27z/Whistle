@@ -147,6 +147,20 @@ export class DivergenceDetector {
       });
     }
 
+    // PATTERN 6: ODDS COLLAPSE
+    const collapses = this.recentOddsSignals.filter((s) => s.type === "odds_collapse");
+    for (const c of collapses) {
+      alerts.push({
+        type: "silent_odds_shift",
+        severity: "critical",
+        fixtureId: c.fixtureId,
+        title: "Odds Collapsed",
+        description: `${c.market} odds crashed from ${c.from?.toFixed(2)} to ${c.to?.toFixed(2)}. A massive shift like this usually means the outcome is near-certain — check for unreported events.`,
+        data: c as unknown as Record<string, unknown>,
+        ts: now,
+      });
+    }
+
     // Apply cooldowns
     const filtered = alerts.filter((a) => {
       const key = `${a.fixtureId}:${a.type}`;

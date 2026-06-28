@@ -15,6 +15,37 @@ import type { Severity } from "../engine/divergence";
 import { logger } from "../utils/logger";
 
 export function setupCommands(bot: Bot, eventTracker: EventTracker, onWatch: (fixtureId: number) => void): void {
+  bot.api.setMyCommands([
+    { command: "start", description: "Welcome message and overview" },
+    { command: "watch", description: "Pick a live match to monitor" },
+    { command: "unwatch", description: "Stop watching a match" },
+    { command: "live", description: "View your watched matches" },
+    { command: "alerts", description: "Recent divergence alerts" },
+    { command: "settings", description: "Configure alert severity" },
+    { command: "stats", description: "Alert statistics" },
+    { command: "help", description: "How Whistle works" },
+  ]).catch(() => {});
+
+  bot.command("help", async (ctx) => {
+    await ctx.reply(
+      `📖 *How Whistle Works*\n\n` +
+        `Whistle connects to TxODDS live data streams and cross\\-references odds movements with match events in real\\-time\\.\n\n` +
+        `*Divergence patterns I detect:*\n\n` +
+        `🔴 *Silent Odds Shift* — Multiple bookmakers move odds sharply with no visible match event\\. Could signal insider info, injury, or tactical change\\.\n\n` +
+        `🟠 *Delayed Market Reaction* — A goal, red card, or penalty happens but odds haven't adjusted within 10s\\. The market is slow\\.\n\n` +
+        `🟡 *Momentum Mispricing* — Sustained attacking pressure \\(3\\+ danger possessions\\) but odds haven't shortened\\. Goal probability is underpriced\\.\n\n` +
+        `⚪ *Bookmaker Disagreement* — \\>15% spread across bookmakers on the same market\\. Someone knows something\\.\n\n` +
+        `*Commands:*\n` +
+        `/watch — Pick a match to monitor\n` +
+        `/unwatch — Stop monitoring\n` +
+        `/live — Your active matches\n` +
+        `/alerts — Recent alerts\n` +
+        `/settings — Set minimum severity\n` +
+        `/stats — Alert breakdown`,
+      { parse_mode: "MarkdownV2" }
+    );
+  });
+
   bot.command("start", async (ctx) => {
     const userId = ctx.from?.id;
     if (userId) ensureUser(userId, ctx.from?.username);
