@@ -93,6 +93,7 @@ async function main(): Promise<void> {
   });
 
   bot.start({
+    drop_pending_updates: true,
     onStart: () => {
       logger.info("main", "Whistle is live. Watching for opportunities...");
     },
