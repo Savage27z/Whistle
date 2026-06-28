@@ -5,6 +5,7 @@ export interface OddsSnapshot {
   value: number;
   ts: number;
   bookmakerId: number;
+  bookmakerName: string;
 }
 
 export interface OddsSignal {
@@ -45,7 +46,7 @@ export class OddsTracker {
       const history = fixtureState.history.get(key) || [];
       const prevValue = history.length > 0 ? history[history.length - 1].value : null;
 
-      history.push({ value: price, ts: update.ts, bookmakerId: update.bookmakerId });
+      history.push({ value: price, ts: update.ts, bookmakerId: update.bookmakerId, bookmakerName: update.bookmakerName });
       if (history.length > MAX_HISTORY) history.splice(0, history.length - MAX_HISTORY);
       fixtureState.history.set(key, history);
 
@@ -148,6 +149,54 @@ export class OddsTracker {
       if (Math.abs(v) > 0.05) count++;
     }
     return count;
+  }
+
+  getBookmakerSnapshot(fixtureId: number, oddsType: string, outcomeName: string): { name: string; value: number; direction: "up" | "down" | "stable" }[] {
+    const state = this.state.get(fixtureId);
+    if (!state) return [];
+
+    const suffix = `:${oddsType}:${outcomeName}`;
+    const seen = new Map<number, { name: string; value: number; prev: number | null }>();
+
+    for (const [key, history] of state.history) {
+      if (!key.endsWith(suffix) || history.length === 0) continue;
+      const latest = history[history.length - 1];
+      const prev = history.length >= 2 ? history[history.length - 2].value : null;
+      seen.set(latest.bookmakerId, { name: latest.bookmakerName, value: latest.value, prev });
+    }
+
+    return Array.from(seen.values()).map((b) => ({
+      name: b.name,
+      value: b.value,
+      direction: b.prev === null ? "stable" as const : b.value < b.prev ? "down" as const : b.value > b.prev ? "up" as const : "stable" as const,
+    }));
+  }
+
+  getMarketSummary(fixtureId: number): { market: string; bookmakerCount: number; consensus: number; spread: number }[] {
+    const state = this.state.get(fixtureId);
+    if (!state) return [];
+
+    const markets = new Map<string, number[]>();
+    for (const [key, history] of state.history) {
+      if (history.length === 0) continue;
+      const parts = key.split(":");
+      const marketKey = parts.slice(1).join(":");
+      if (!markets.has(marketKey)) markets.set(marketKey, []);
+      markets.get(marketKey)!.push(history[history.length - 1].value);
+    }
+
+    const result: { market: string; bookmakerCount: number; consensus: number; spread: number }[] = [];
+    for (const [market, values] of markets) {
+      if (values.length === 0) continue;
+      values.sort((a, b) => a - b);
+      const median = values[Math.floor(values.length / 2)];
+      const min = values[0];
+      const max = values[values.length - 1];
+      const spread = min > 0 ? (max - min) / min : 0;
+      result.push({ market, bookmakerCount: values.length, consensus: median, spread });
+    }
+
+    return result.sort((a, b) => b.bookmakerCount - a.bookmakerCount);
   }
 
   private calculateSpread(state: OddsState, oddsType: string, outcomeName: string): number {

@@ -23,12 +23,25 @@ function severityEmoji(severity: string): string {
   }
 }
 
-export async function narrateAlert(alert: DivergenceAlert, matchState?: MatchState): Promise<string> {
+export function formatOddsSnapshot(snapshot: { name: string; value: number; direction: "up" | "down" | "stable" }[]): string {
+  if (snapshot.length === 0) return "";
+  const arrow = (d: string) => d === "down" ? "↓" : d === "up" ? "↑" : "→";
+  const lines = snapshot.slice(0, 4).map((b) => `  ${escHtml(b.name)}: ${b.value.toFixed(2)} ${arrow(b.direction)}`);
+  return `\n📊 <b>Odds snapshot:</b>\n${lines.join("\n")}`;
+}
+
+function confidenceBar(confidence: number): string {
+  const filled = Math.round(confidence / 10);
+  const empty = 10 - filled;
+  return "▓".repeat(filled) + "░".repeat(empty) + ` ${confidence}%`;
+}
+
+export async function narrateAlert(alert: DivergenceAlert, matchState?: MatchState, oddsSnapshot?: { name: string; value: number; direction: "up" | "down" | "stable" }[]): Promise<string> {
   const now = Date.now();
   if (now - lastApiCall < apiBackoffMs) {
-    return formatFallback(alert, matchState);
+    return formatFallback(alert, matchState, oddsSnapshot);
   }
-  if (!config.openrouterApiKey) return formatFallback(alert, matchState);
+  if (!config.openrouterApiKey) return formatFallback(alert, matchState, oddsSnapshot);
 
   const team1 = matchState?.team1 || "Home";
   const team2 = matchState?.team2 || "Away";
@@ -39,7 +52,7 @@ export async function narrateAlert(alert: DivergenceAlert, matchState?: MatchSta
   const prompt = `You are Whistle, an AI sports trading intelligence agent. Write a Telegram alert (max 5 lines, strictly plain text — no markdown, no HTML, no asterisks, no underscores for formatting).
 
 Match: ${team1} vs ${team2} | ${score} | ${minute}' | ${phase}
-Signal: ${alert.type} (${alert.severity})
+Signal: ${alert.type} (${alert.severity}, confidence: ${alert.confidence}%)
 Details: ${alert.description}
 
 Rules:
@@ -74,18 +87,21 @@ Rules:
       } else {
         logger.error("narrator", `OpenRouter error: ${res.status}`);
       }
-      return formatFallback(alert, matchState);
+      return formatFallback(alert, matchState, oddsSnapshot);
     }
 
     apiBackoffMs = BASE_API_INTERVAL_MS;
 
     const data = (await res.json()) as { choices: { message: { content: string } }[] };
     const raw = data.choices?.[0]?.message?.content;
-    if (!raw) return formatFallback(alert, matchState);
-    return escHtml(raw);
+    if (!raw) return formatFallback(alert, matchState, oddsSnapshot);
+    let result = escHtml(raw);
+    result += `\n\n🎯 Confidence: ${confidenceBar(alert.confidence)}`;
+    if (oddsSnapshot) result += formatOddsSnapshot(oddsSnapshot);
+    return result;
   } catch (err) {
     logger.error("narrator", `AI narration failed: ${(err as Error).message}`);
-    return formatFallback(alert, matchState);
+    return formatFallback(alert, matchState, oddsSnapshot);
   }
 }
 
@@ -117,7 +133,7 @@ export function formatMatchEvent(
   }
 }
 
-function formatFallback(alert: DivergenceAlert, matchState?: MatchState): string {
+function formatFallback(alert: DivergenceAlert, matchState?: MatchState, oddsSnapshot?: { name: string; value: number; direction: "up" | "down" | "stable" }[]): string {
   const emoji = severityEmoji(alert.severity);
   const team1 = escHtml(matchState?.team1 || "Home");
   const team2 = escHtml(matchState?.team2 || "Away");
@@ -125,5 +141,8 @@ function formatFallback(alert: DivergenceAlert, matchState?: MatchState): string
   const minute = matchState?.minute ? `${matchState.minute}'` : "";
   const header = [team1, "vs", team2, score, minute].filter(Boolean).join(" ");
 
-  return `${emoji} <b>${escHtml(alert.title.toUpperCase())}</b>\n${header}\n\n${escHtml(alert.description)}`;
+  let msg = `${emoji} <b>${escHtml(alert.title.toUpperCase())}</b>\n${header}\n\n${escHtml(alert.description)}`;
+  msg += `\n\n🎯 Confidence: ${confidenceBar(alert.confidence)}`;
+  if (oddsSnapshot) msg += formatOddsSnapshot(oddsSnapshot);
+  return msg;
 }

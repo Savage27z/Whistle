@@ -11,15 +11,19 @@ import {
 } from "../db/queries";
 import { formatMatchLine } from "./formatters";
 import type { EventTracker } from "../engine/event-tracker";
-import type { Severity } from "../engine/divergence";
+import type { Severity, DivergenceDetector } from "../engine/divergence";
+import type { OddsTracker } from "../engine/odds-tracker";
 import { logger } from "../utils/logger";
 import { escHtml } from "../engine/narrator";
+import { config } from "../utils/config";
 
 export function setupCommands(
   bot: Bot,
   eventTracker: EventTracker,
   onWatch: (fixtureId: number) => void,
   getStreamHealth: () => { active: number; globalConnected: boolean },
+  divergenceDetector: DivergenceDetector,
+  oddsTracker: OddsTracker,
 ): void {
   bot.api.setMyCommands([
     { command: "start", description: "Welcome message and overview" },
@@ -28,8 +32,11 @@ export function setupCommands(
     { command: "live", description: "View your watched matches" },
     { command: "alerts", description: "Recent divergence alerts" },
     { command: "settings", description: "Configure alert severity" },
-    { command: "stats", description: "Alert statistics" },
+    { command: "stats", description: "Alert statistics + edge accuracy" },
     { command: "status", description: "Bot connection status" },
+    { command: "briefing", description: "Pre-match market overview" },
+    { command: "predict", description: "AI match prediction" },
+    { command: "history", description: "Alert history for a match" },
     { command: "help", description: "How Whistle works" },
   ]).catch(() => {});
 
@@ -50,8 +57,11 @@ export function setupCommands(
         `/unwatch — Stop monitoring\n` +
         `/live — Your active matches\n` +
         `/alerts — Recent alerts\n` +
+        `/briefing — Pre-match market overview\n` +
+        `/predict — AI match prediction\n` +
+        `/history — Alert timeline for a match\n` +
         `/settings — Set minimum severity\n` +
-        `/stats — Alert breakdown\n` +
+        `/stats — Alert breakdown + edge accuracy\n` +
         `/status — Connection health`,
       { parse_mode: "HTML" }
     );
@@ -63,14 +73,20 @@ export function setupCommands(
 
     await ctx.reply(
       `⚽ <b>Welcome to Whistle</b>\n\n` +
-        `I watch live World Cup matches through TxODDS data feeds and alert you to trading opportunities in real-time.\n\n` +
+        `AI-powered trading intelligence for the World Cup. I watch live matches through TxODDS data feeds and alert you to opportunities in real-time.\n\n` +
         `<b>What I detect:</b>\n` +
         `🔴 Silent odds shifts — market moves with no visible event\n` +
         `🟠 Delayed reactions — big events the market hasn't priced\n` +
         `🟡 Momentum mispricing — sustained pressure not in the odds\n` +
         `⚪ Bookmaker disagreement — some books know more\n\n` +
+        `<b>Every alert includes:</b>\n` +
+        `🎯 Confidence score — how certain the signal is\n` +
+        `📊 Live odds snapshot — per-bookmaker prices + direction\n\n` +
         `Plus instant match event alerts: goals, red cards, penalties, VAR.\n\n` +
-        `Use /watch to pick a live match and start receiving alerts.`,
+        `<b>Quick start:</b>\n` +
+        `/briefing — See today's matches + market overview\n` +
+        `/watch — Pick a match to monitor\n` +
+        `/predict — AI match prediction`,
       { parse_mode: "HTML" }
     );
   });
@@ -259,7 +275,16 @@ export function setupCommands(
       bySeverity[a.severity] = (bySeverity[a.severity] || 0) + 1;
     }
 
+    const edge = divergenceDetector.getEdgeStats();
+
     let msg = `<b>Whistle Stats</b>\n\nTotal alerts: ${alerts.length}\n\n`;
+
+    if (edge.total > 0) {
+      msg += `<b>Edge tracker:</b>\n`;
+      msg += `  Alerts fired: ${edge.total}\n`;
+      msg += `  Confirmed edges: ${edge.confirmed}\n`;
+      msg += `  Accuracy: ${edge.accuracy}%\n\n`;
+    }
 
     if (Object.keys(bySeverity).length > 0) {
       msg += `<b>By severity:</b>\n`;
@@ -301,4 +326,178 @@ export function setupCommands(
 
     await ctx.reply(msg, { parse_mode: "HTML" });
   });
+
+  bot.command("briefing", async (ctx) => {
+    try {
+      const fixtures = await fetchFixtures();
+      if (fixtures.length === 0) {
+        return ctx.reply("No live or upcoming World Cup matches right now.");
+      }
+
+      let msg = `📋 <b>Match Day Briefing</b>\n\n`;
+
+      for (const f of fixtures) {
+        const state = eventTracker.getMatchState(f.fixtureId);
+        const markets = oddsTracker.getMarketSummary(f.fixtureId);
+
+        msg += `⚽ <b>${escHtml(f.team1)} vs ${escHtml(f.team2)}</b>\n`;
+
+        if (state && state.phase !== "NS") {
+          msg += `   ${state.score[0]}-${state.score[1]} | ${state.minute}'\n`;
+        } else {
+          const kickoff = new Date(f.startTime * 1000);
+          msg += `   Kickoff: ${kickoff.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}\n`;
+        }
+
+        if (markets.length > 0) {
+          const topMarkets = markets.slice(0, 3);
+          for (const m of topMarkets) {
+            const spreadPct = (m.spread * 100).toFixed(0);
+            msg += `   📊 ${escHtml(m.market)}: ${m.consensus.toFixed(2)} (${m.bookmakerCount} books, ${spreadPct}% spread)\n`;
+          }
+        } else {
+          msg += `   No odds data yet\n`;
+        }
+        msg += `\n`;
+      }
+
+      msg += `Use /watch to start receiving alerts for any match.`;
+      await ctx.reply(msg, { parse_mode: "HTML" });
+    } catch (err) {
+      logger.error("bot", `Briefing failed: ${(err as Error).message}`);
+      await ctx.reply("Couldn't generate briefing right now. Try again later.");
+    }
+  });
+
+  bot.command("predict", async (ctx) => {
+    const userId = ctx.from?.id;
+    if (!userId) return;
+
+    const watching = getUserWatchList(userId);
+    if (watching.length === 0) {
+      return ctx.reply("Watch a match first with /watch, then use /predict to get an AI prediction.");
+    }
+
+    const fixtureId = watching[0].fixture_id;
+    const state = eventTracker.getMatchState(fixtureId);
+    if (!state) {
+      return ctx.reply("No match data available yet. Wait for the match to start.");
+    }
+
+    const markets = oddsTracker.getMarketSummary(fixtureId);
+    const edge = divergenceDetector.getEdgeStats();
+
+    const marketInfo = markets.slice(0, 5).map((m) =>
+      `${m.market}: consensus ${m.consensus.toFixed(2)}, ${m.bookmakerCount} books, ${(m.spread * 100).toFixed(0)}% spread`
+    ).join("\n");
+
+    if (!config.openrouterApiKey) {
+      return ctx.reply("AI predictions require OpenRouter API key.");
+    }
+
+    await ctx.reply("🔮 Generating prediction...");
+
+    try {
+      const prompt = `You are Whistle, an AI sports trading analyst. Generate a brief match prediction based on live data (max 8 lines, plain text only, no formatting characters).
+
+Match: ${state.team1} vs ${state.team2} | ${state.score[0]}-${state.score[1]} | ${state.minute}' | Phase: ${state.phase}
+Danger sequences: ${state.dangerSequence} (team ${state.dangerTeam || "none"})
+Last goal: minute ${state.lastGoalMinute || "none"}
+
+Current odds data:
+${marketInfo || "No market data"}
+
+Session edge accuracy: ${edge.accuracy}% (${edge.confirmed}/${edge.total} confirmed)
+
+Rules:
+- Line 1: Match summary with current momentum assessment
+- Lines 2-4: Key market insights based on the odds data above
+- Lines 5-6: Predicted outcome with reasoning
+- Line 7-8: Top 1-2 trading opportunities right now
+- Be specific with odds values. Name specific markets.
+- Do NOT use any formatting characters like *, _, ~, \`, [ ]`;
+
+      const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${config.openrouterApiKey}`,
+        },
+        body: JSON.stringify({
+          model: "meta-llama/llama-3.3-70b-instruct:free",
+          messages: [{ role: "user", content: prompt }],
+          max_tokens: 350,
+          temperature: 0.7,
+        }),
+      });
+
+      if (!res.ok) {
+        return ctx.reply("AI prediction unavailable right now (rate limited). Try again in a few minutes.");
+      }
+
+      const data = (await res.json()) as { choices: { message: { content: string } }[] };
+      const raw = data.choices?.[0]?.message?.content;
+      if (!raw) return ctx.reply("Couldn't generate prediction. Try again.");
+
+      const header = `🔮 <b>AI Prediction</b>\n${escHtml(state.team1)} ${state.score[0]}-${state.score[1]} ${escHtml(state.team2)} | ${state.minute}'\n\n`;
+      await ctx.reply(header + escHtml(raw), { parse_mode: "HTML" });
+    } catch (err) {
+      logger.error("bot", `Predict failed: ${(err as Error).message}`);
+      await ctx.reply("Prediction failed. Try again later.");
+    }
+  });
+
+  bot.command("history", async (ctx) => {
+    const userId = ctx.from?.id;
+    if (!userId) return;
+
+    const watching = getUserWatchList(userId);
+    if (watching.length === 0) {
+      return ctx.reply("You're not watching any matches. Use /watch first.");
+    }
+
+    if (watching.length === 1) {
+      const fixtureId = watching[0].fixture_id;
+      return sendHistory(ctx, fixtureId);
+    }
+
+    const keyboard = new InlineKeyboard();
+    for (const w of watching) {
+      const state = eventTracker.getMatchState(w.fixture_id);
+      const label = state ? `${state.team1} vs ${state.team2}` : `Fixture ${w.fixture_id}`;
+      keyboard.text(label, `history:${w.fixture_id}`).row();
+    }
+
+    await ctx.reply("<b>Select a match to view history:</b>", {
+      reply_markup: keyboard,
+      parse_mode: "HTML",
+    });
+  });
+
+  bot.callbackQuery(/^history:(\d+)$/, async (ctx) => {
+    const fixtureId = parseInt(ctx.match![1]);
+    await ctx.answerCallbackQuery();
+    await sendHistory(ctx, fixtureId);
+  });
+
+  async function sendHistory(ctx: any, fixtureId: number): Promise<void> {
+    const allAlerts = getRecentAlerts(500);
+    const matchAlerts = allAlerts.filter((a) => a.fixture_id === fixtureId).slice(0, 15);
+
+    const state = eventTracker.getMatchState(fixtureId);
+    const label = state ? `${escHtml(state.team1)} vs ${escHtml(state.team2)}` : `Fixture ${fixtureId}`;
+
+    if (matchAlerts.length === 0) {
+      return ctx.reply(`No alerts yet for ${label}.`);
+    }
+
+    let msg = `📜 <b>Alert History — ${label}</b>\n\n`;
+    for (const a of matchAlerts) {
+      const time = new Date(a.created_at * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      const sevEmoji = a.severity === "critical" ? "🔴" : a.severity === "high" ? "🟠" : a.severity === "medium" ? "🟡" : "⚪";
+      msg += `${sevEmoji} <b>${escHtml(a.title)}</b> — ${escHtml(time)}\n`;
+    }
+
+    await ctx.reply(msg, { parse_mode: "HTML" });
+  }
 }

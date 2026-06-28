@@ -26,7 +26,16 @@ const MAJOR_EVENTS = new Set(["goal", "red_card", "penalty", "var_review"]);
 
 async function deliverAlert(alert: DivergenceAlert): Promise<void> {
   const matchState = eventTracker.getMatchState(alert.fixtureId);
-  const message = await narrateAlert(alert, matchState);
+  const market = (alert.data as any)?.market as string | undefined;
+  let oddsSnapshot: { name: string; value: number; direction: "up" | "down" | "stable" }[] | undefined;
+  if (market) {
+    const [oddsType, ...outcomeparts] = market.split(":");
+    const outcomeName = outcomeparts.join(":");
+    if (oddsType && outcomeName) {
+      oddsSnapshot = oddsTracker.getBookmakerSnapshot(alert.fixtureId, oddsType, outcomeName);
+    }
+  }
+  const message = await narrateAlert(alert, matchState, oddsSnapshot);
 
   const subscribers = getSubscribersForFixture(alert.fixtureId);
 
@@ -135,6 +144,8 @@ async function main(): Promise<void> {
       startStreamsForFixture(fixtureId);
     },
     () => ({ active: activeStreams.size, globalConnected: globalStreamsStarted }),
+    divergenceDetector,
+    oddsTracker,
   );
 
   bot.start({
@@ -204,6 +215,7 @@ async function main(): Promise<void> {
 
     globalOdds.on("data", (oddsUpdate) => {
       const signals = oddsTracker.processOddsUpdate(oddsUpdate);
+      divergenceDetector.verifyEdges(signals);
       if (signals.length > 0) {
         const alerts = divergenceDetector.processOddsSignals(signals);
         for (const alert of alerts) deliverAlert(alert).catch((e) => logger.error("alert-delivery", e.message));
