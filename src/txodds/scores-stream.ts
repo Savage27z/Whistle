@@ -107,10 +107,11 @@ export function createScoresStream(opts: ScoresStreamOptions): EventEmitter {
     let buffer = "";
 
     while (!stopped) {
+      let timer: ReturnType<typeof setTimeout>;
       const readWithTimeout = Promise.race([
         reader.read(),
-        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("read timeout")), 90_000)),
-      ]);
+        new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("read timeout")), 90_000); }),
+      ]).finally(() => clearTimeout(timer!));
       const { value, done } = await readWithTimeout;
       if (done) {
         logger.info("scores-stream", "Stream ended, reconnecting in 3s");

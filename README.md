@@ -150,7 +150,7 @@ The core insight: **odds and events should move together**. When they diverge, t
 3. **DivergenceDetector** cross-correlates both signal streams within a 2-minute window to detect the 6 patterns above
 4. Each alert gets a **confidence score** (0-95%) and **per-bookmaker odds snapshot** with direction arrows
 5. **Edge tracker** verifies alerts against subsequent market movement (15s-120s window) and reports accuracy
-6. Major match events (goals, red cards, penalties, VAR) are sent as instant notifications to all subscribers
+6. Major match events (goals, red cards, penalties, VAR, kickoff/HT/FT) are sent as instant notifications to all subscribers
 7. Alerts have severity-based cooldowns (critical: 60s, high: 120s, medium/low: 180s) per fixture+type+market
 
 ## Project structure

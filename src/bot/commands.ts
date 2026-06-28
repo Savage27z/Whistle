@@ -52,7 +52,7 @@ export function setupCommands(
         `🟡 <b>Momentum Mispricing</b> — Sustained attacking pressure (3+ danger possessions) but odds haven't shortened. Goal probability is underpriced.\n\n` +
         `🟡 <b>Goal Imminent</b> — TxODDS signals an imminent goal but Over/BTTS market hasn't tightened.\n\n` +
         `⚪ <b>Bookmaker Disagreement</b> — 20%+ spread across 3+ bookmakers on the same market. Someone knows something.\n\n` +
-        `<b>Match events:</b> You'll also receive instant alerts for goals ⚽, red cards 🟥, penalties ⚠️, and VAR reviews 📺.\n\n` +
+        `<b>Match events:</b> You'll also receive instant alerts for goals ⚽, red cards 🟥, penalties ⚠️, VAR reviews 📺, and match phases 🕐 (kickoff, half time, full time).\n\n` +
         `<b>Commands:</b>\n` +
         `/watch — Pick a match to monitor\n` +
         `/watchall — Watch all matches at once\n` +
@@ -84,7 +84,7 @@ export function setupCommands(
         `<b>Every alert includes:</b>\n` +
         `🎯 Confidence score — how certain the signal is\n` +
         `📊 Live odds snapshot — per-bookmaker prices + direction\n\n` +
-        `Plus instant match event alerts: goals, red cards, penalties, VAR.\n\n` +
+        `Plus instant match event alerts: goals, red cards, penalties, VAR, kickoff/HT/FT.\n\n` +
         `🔗 Powered by on-chain Solana subscription (Token-2022, devnet)\n\n` +
         `<b>Quick start:</b>\n` +
         `/briefing — See today's matches + market overview\n` +
@@ -109,7 +109,7 @@ export function setupCommands(
       onWatch(fixtureId);
       const matchState = eventTracker.getMatchState(fixtureId);
       const label = matchState ? `${matchState.team1} vs ${matchState.team2}` : `fixture ${fixtureId}`;
-      return ctx.reply(`✅ Now watching ${escHtml(label)}. I'll alert you when I spot something.\n\nUse /unwatch to stop.`);
+      return ctx.reply(`✅ Now watching <b>${escHtml(label)}</b>. I'll alert you when I spot something.\n\nUse /unwatch to stop.`, { parse_mode: "HTML" });
     }
 
     try {
@@ -194,7 +194,7 @@ export function setupCommands(
         return ctx.reply("Invalid fixture ID.");
       }
       unsubscribeWatch(userId, fixtureId);
-      return ctx.reply(`Stopped watching fixture ${fixtureId}.`);
+      return ctx.reply(`Stopped watching fixture ${fixtureId}.`, { parse_mode: "HTML" });
     }
 
     const watching = getUserWatchList(userId);
@@ -224,7 +224,7 @@ export function setupCommands(
     const label = state ? `${state.team1} vs ${state.team2}` : `fixture ${fixtureId}`;
 
     await ctx.answerCallbackQuery({ text: "Stopped watching." });
-    await ctx.editMessageText(`Stopped watching ${escHtml(label)}.`);
+    await ctx.editMessageText(`Stopped watching <b>${escHtml(label)}</b>.`, { parse_mode: "HTML" });
   });
 
   bot.command("live", async (ctx) => {
@@ -236,14 +236,18 @@ export function setupCommands(
       return ctx.reply("You're not watching any matches. Use /watch to start.");
     }
 
-    let msg = "<b>Your live matches:</b>\n\n";
-    for (const w of watching) {
+    let msg = `<b>Your live matches:</b> (${watching.length})\n\n`;
+    const shown = watching.slice(0, 10);
+    for (const w of shown) {
       const state = eventTracker.getMatchState(w.fixture_id);
       if (state) {
         msg += formatMatchLine(state, w.alert_count) + "\n\n";
       } else {
         msg += `📋 Fixture ${w.fixture_id} — awaiting data\n   Alerts sent: ${w.alert_count}\n\n`;
       }
+    }
+    if (watching.length > 10) {
+      msg += `...and ${watching.length - 10} more\n`;
     }
 
     await ctx.reply(msg, { parse_mode: "HTML" });
@@ -326,10 +330,11 @@ export function setupCommands(
       msg += `  Accuracy: ${edge.accuracy}%\n\n`;
     }
 
+    const sevLabels: Record<string, string> = { critical: "🔴 Critical", high: "🟠 High", medium: "🟡 Medium", low: "⚪ Low" };
     if (Object.keys(bySeverity).length > 0) {
       msg += `<b>By severity:</b>\n`;
       for (const [sev, count] of Object.entries(bySeverity)) {
-        msg += `  ${sev}: ${count}\n`;
+        msg += `  ${sevLabels[sev] || sev}: ${count}\n`;
       }
       msg += `\n`;
     }
@@ -566,7 +571,7 @@ Rules:
     const label = state ? `${escHtml(state.team1)} vs ${escHtml(state.team2)}` : `Fixture ${fixtureId}`;
 
     if (matchAlerts.length === 0) {
-      return ctx.reply(`No alerts yet for ${label}.`);
+      return ctx.reply(`No alerts yet for ${label}.`, { parse_mode: "HTML" });
     }
 
     let msg = `📜 <b>Alert History — ${label}</b>\n\n`;
