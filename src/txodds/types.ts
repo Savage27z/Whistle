@@ -73,6 +73,20 @@ export interface ScoreEvent {
   seq: number;
 }
 
+export interface RawFixture {
+  FixtureId: number;
+  Participant1: string;
+  Participant2: string;
+  Participant1Id: number;
+  Participant2Id: number;
+  StartTime: number;
+  CompetitionId: number;
+  Competition: string;
+  FixtureGroupId: number;
+  Participant1IsHome: boolean;
+  Ts: number;
+}
+
 export interface Fixture {
   fixtureId: number;
   team1: string;

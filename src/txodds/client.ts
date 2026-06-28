@@ -1,7 +1,7 @@
 import { ENDPOINTS } from "./constants";
 import { config } from "../utils/config";
 import { logger } from "../utils/logger";
-import type { Fixture } from "./types";
+import type { Fixture, RawFixture } from "./types";
 
 function headers(): Record<string, string> {
   return {
@@ -17,8 +17,16 @@ export async function fetchFixtures(): Promise<Fixture[]> {
     logger.error("txodds-client", "Failed to fetch fixtures", { status: res.status });
     return [];
   }
-  const body = (await res.json()) as Fixture[] | { fixtures: Fixture[] };
-  return Array.isArray(body) ? body : (body as { fixtures: Fixture[] }).fixtures || [];
+  const body = (await res.json()) as RawFixture[];
+  const raw = Array.isArray(body) ? body : [];
+  return raw.map((f) => ({
+    fixtureId: f.FixtureId,
+    team1: f.Participant1,
+    team2: f.Participant2,
+    startTime: f.StartTime,
+    leagueId: f.CompetitionId,
+    leagueName: f.Competition,
+  }));
 }
 
 export async function fetchOddsSnapshot(fixtureId: number): Promise<unknown> {
