@@ -72,7 +72,7 @@ TxODDS SSE Streams
 - **AI**: LLaMA 3.3 70B via OpenRouter (free tier)
 - **Bot**: Grammy (Telegram bot framework)
 - **Deployment**: Railway
-- **Dashboard**: Next.js (landing page + live alert feed)
+- **Storage**: JSON file-based persistence
 
 ## Setup
 
@@ -180,7 +180,6 @@ src/
   utils/
     config.ts           # Environment config
     logger.ts           # Structured logger
-dashboard/              # Next.js app (landing + live feed)
 ```
 
 ## License

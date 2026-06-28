@@ -23,7 +23,7 @@ let globalStreamsStarted = false;
 
 let bot: Bot;
 
-const MAJOR_EVENTS = new Set(["goal", "red_card", "penalty", "var_review"]);
+const MAJOR_EVENTS = new Set(["goal", "red_card", "penalty", "var_review", "phase_change"]);
 
 async function deliverAlert(alert: DivergenceAlert): Promise<void> {
   const matchState = eventTracker.getMatchState(alert.fixtureId);
@@ -65,6 +65,8 @@ async function deliverMatchEvent(signal: import("./engine/event-tracker").EventS
     minute: signal.minute,
     goalType: signal.goalType,
     newScore: signal.newScore,
+    from: signal.from,
+    to: signal.to,
   });
 
   const subscribers = getSubscribersForFixture(signal.fixtureId);
@@ -109,6 +111,7 @@ function startStreamsForFixture(fixtureId: number): void {
       deliverMatchEvent(sig).catch((e) => logger.error("event-delivery", e.message));
     }
     if (eventSignals.length > 0) {
+      divergenceDetector.verifyEdgesFromEvents(eventSignals);
       const alerts = divergenceDetector.processEventSignals(eventSignals);
       for (const alert of alerts) {
         deliverAlert(alert).catch((e) => logger.error("alert-delivery", e.message));
@@ -217,6 +220,7 @@ async function main(): Promise<void> {
         deliverMatchEvent(sig).catch((e) => logger.error("event-delivery", e.message));
       }
       if (signals.length > 0) {
+        divergenceDetector.verifyEdgesFromEvents(signals);
         const alerts = divergenceDetector.processEventSignals(signals);
         for (const alert of alerts) deliverAlert(alert).catch((e) => logger.error("alert-delivery", e.message));
       }

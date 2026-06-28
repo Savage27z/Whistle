@@ -69,6 +69,30 @@ export class DivergenceDetector {
     return this.detect(now);
   }
 
+  verifyEdgesFromEvents(eventSignals: EventSignal[]): void {
+    const now = Date.now();
+    const toRemove: number[] = [];
+
+    for (let i = 0; i < this.pendingEdges.length; i++) {
+      const edge = this.pendingEdges[i];
+      if (edge.type !== "momentum_mispricing") continue;
+      if (now - edge.firedAt < 15_000) continue;
+
+      const goalHappened = eventSignals.some(
+        (s) => s.fixtureId === edge.fixtureId && s.type === "goal"
+      );
+      if (goalHappened) {
+        this.confirmedEdges++;
+        this.edgeResults.push({ alertId: edge.id, fixtureId: edge.fixtureId, type: edge.type, confirmed: true, checkedAt: now });
+        toRemove.push(i);
+      }
+    }
+
+    for (let i = toRemove.length - 1; i >= 0; i--) {
+      this.pendingEdges.splice(toRemove[i], 1);
+    }
+  }
+
   verifyEdges(oddsSignals: OddsSignal[]): void {
     const now = Date.now();
     const toRemove: number[] = [];

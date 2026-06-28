@@ -257,7 +257,7 @@ export function setupCommands(
 
     let msg = "<b>Recent Alerts:</b>\n\n";
     for (const a of alerts) {
-      const time = new Date(a.created_at * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      const time = new Date(a.created_at * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", timeZone: "UTC" }) + " UTC";
       const sevEmoji = a.severity === "critical" ? "🔴" : a.severity === "high" ? "🟠" : a.severity === "medium" ? "🟡" : "⚪";
       const state = eventTracker.getMatchState(a.fixture_id);
       const match = state ? `${escHtml(state.team1)} vs ${escHtml(state.team2)}` : `Fixture ${a.fixture_id}`;
@@ -296,7 +296,10 @@ export function setupCommands(
   });
 
   bot.callbackQuery(/^severity:(\w+)$/, async (ctx) => {
-    const severity = ctx.match![1] as Severity;
+    const raw = ctx.match![1];
+    const valid: Severity[] = ["low", "medium", "high", "critical"];
+    if (!valid.includes(raw as Severity)) return ctx.answerCallbackQuery({ text: "Invalid severity" });
+    const severity = raw as Severity;
     const userId = ctx.from.id;
     updateUserSeverity(userId, severity);
     await ctx.answerCallbackQuery({ text: `Severity set to ${severity}` });
@@ -331,9 +334,15 @@ export function setupCommands(
       msg += `\n`;
     }
 
+    const typeLabels: Record<string, string> = {
+      silent_odds_shift: "Silent Odds Shift",
+      delayed_market_reaction: "Delayed Market Reaction",
+      momentum_mispricing: "Momentum Mispricing",
+      value_spot: "Value Spot / Disagreement",
+    };
     msg += `<b>By type:</b>\n`;
     for (const [type, count] of Object.entries(byType)) {
-      msg += `  ${type.replace(/_/g, " ")}: ${count}\n`;
+      msg += `  ${typeLabels[type] || type}: ${count}\n`;
     }
 
     await ctx.reply(msg, { parse_mode: "HTML" });
@@ -374,9 +383,10 @@ export function setupCommands(
         return ctx.reply("No live or upcoming World Cup matches right now.");
       }
 
-      let msg = `📋 <b>Match Day Briefing</b>\n\n`;
+      let msg = `📋 <b>Match Day Briefing</b> (${fixtures.length} matches)\n\n`;
 
-      for (const f of fixtures) {
+      const shown = fixtures.slice(0, 8);
+      for (const f of shown) {
         const state = eventTracker.getMatchState(f.fixtureId);
         const markets = oddsTracker.getMarketSummary(f.fixtureId);
 
@@ -386,7 +396,7 @@ export function setupCommands(
           msg += `   ${state.score[0]}-${state.score[1]} | ${state.minute}'\n`;
         } else {
           const kickoff = new Date(f.startTime);
-          msg += `   Kickoff: ${kickoff.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}\n`;
+          msg += `   Kickoff: ${kickoff.toUTCString().slice(17, 22)} UTC\n`;
         }
 
         if (markets.length > 0) {
@@ -401,6 +411,9 @@ export function setupCommands(
         msg += `\n`;
       }
 
+      if (fixtures.length > 8) {
+        msg += `...and ${fixtures.length - 8} more matches\n\n`;
+      }
       msg += `Use /watch to start receiving alerts for any match.`;
       await ctx.reply(msg, { parse_mode: "HTML" });
     } catch (err) {
@@ -558,7 +571,7 @@ Rules:
 
     let msg = `📜 <b>Alert History — ${label}</b>\n\n`;
     for (const a of matchAlerts) {
-      const time = new Date(a.created_at * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      const time = new Date(a.created_at * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "UTC" }) + " UTC";
       const sevEmoji = a.severity === "critical" ? "🔴" : a.severity === "high" ? "🟠" : a.severity === "medium" ? "🟡" : "⚪";
       msg += `${sevEmoji} <b>${escHtml(a.title)}</b> — ${escHtml(time)}\n`;
     }
