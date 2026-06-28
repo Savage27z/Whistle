@@ -114,9 +114,5 @@ export function createOddsStream(opts: OddsStreamOptions): StoppableEmitter {
 
   startWithReconnect();
 
-  (emitter as any).stop = () => {
-    stopped = true;
-  };
-
   return emitter;
 }

@@ -159,9 +159,5 @@ export function createScoresStream(opts: ScoresStreamOptions): StoppableEmitter 
 
   startWithReconnect();
 
-  (emitter as any).stop = () => {
-    stopped = true;
-  };
-
   return emitter;
 }
