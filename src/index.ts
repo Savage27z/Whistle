@@ -168,6 +168,15 @@ async function main(): Promise<void> {
     process.exit(0);
   });
 
+  process.on("uncaughtException", (err: any) => {
+    if (err?.error_code === 409) {
+      logger.warn("main", "Bot polling conflict (409) — old instance still running, restarting...");
+      process.exit(1);
+    }
+    logger.error("main", `Uncaught exception: ${err.message}`);
+    process.exit(1);
+  });
+
   if (config.txoddsJwt && config.txoddsApiToken) {
     globalStreamsStarted = true;
     logger.info("main", "Starting global TxODDS streams");
