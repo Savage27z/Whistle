@@ -33,7 +33,7 @@ Format: Use emoji prefix based on severity (🔴 critical, 🟠 high, 🟡 mediu
         Authorization: `Bearer ${config.openrouterApiKey}`,
       },
       body: JSON.stringify({
-        model: "meta-llama/llama-3.1-8b-instruct:free",
+        model: "meta-llama/llama-3.3-70b-instruct:free",
         messages: [{ role: "user", content: prompt }],
         max_tokens: 200,
         temperature: 0.7,
