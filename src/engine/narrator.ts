@@ -1,20 +1,12 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { config } from "../utils/config";
 import { logger } from "../utils/logger";
 import type { DivergenceAlert } from "./divergence";
 import type { MatchState } from "./event-tracker";
 
-let client: Anthropic | null = null;
-
-function getClient(): Anthropic | null {
-  if (!config.anthropicApiKey) return null;
-  if (!client) client = new Anthropic({ apiKey: config.anthropicApiKey });
-  return client;
-}
+const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
 export async function narrateAlert(alert: DivergenceAlert, matchState?: MatchState): Promise<string> {
-  const anthropic = getClient();
-  if (!anthropic) return formatFallback(alert, matchState);
+  if (!config.openrouterApiKey) return formatFallback(alert, matchState);
 
   const team1 = matchState?.team1 || "Home";
   const team2 = matchState?.team2 || "Away";
@@ -34,15 +26,27 @@ Data: ${JSON.stringify(alert.data)}
 Format: Use emoji prefix based on severity (🔴 critical, 🟠 high, 🟡 medium, ⚪ low). First line is the headline. Rest is the actionable insight. End with the implied trading angle if obvious.`;
 
   try {
-    const response = await anthropic.messages.create({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 200,
-      messages: [{ role: "user", content: prompt }],
+    const res = await fetch(OPENROUTER_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${config.openrouterApiKey}`,
+      },
+      body: JSON.stringify({
+        model: "google/gemma-3-1b-it:free",
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: 200,
+        temperature: 0.7,
+      }),
     });
 
-    const text = response.content[0];
-    if (text.type === "text" && text.text) return text.text;
-    return formatFallback(alert, matchState);
+    if (!res.ok) {
+      logger.error("narrator", `OpenRouter error: ${res.status}`);
+      return formatFallback(alert, matchState);
+    }
+
+    const data = (await res.json()) as { choices: { message: { content: string } }[] };
+    return data.choices?.[0]?.message?.content || formatFallback(alert, matchState);
   } catch (err) {
     logger.error("narrator", `AI narration failed: ${(err as Error).message}`);
     return formatFallback(alert, matchState);

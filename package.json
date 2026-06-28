@@ -10,7 +10,6 @@
     "setup": "tsx src/setup.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.52.0",
     "@coral-xyz/anchor": "^0.30.1",
     "@solana/spl-token": "^0.4.9",
     "@solana/web3.js": "^1.98.0",

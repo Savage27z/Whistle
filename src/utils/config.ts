@@ -2,7 +2,7 @@ import "dotenv/config";
 
 export const config = {
   telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || "",
-  anthropicApiKey: process.env.ANTHROPIC_API_KEY || "",
+  openrouterApiKey: process.env.OPENROUTER_API_KEY || "",
   txoddsJwt: process.env.TXODDS_JWT || "",
   txoddsApiToken: process.env.TXODDS_API_TOKEN || "",
   solanaPrivateKey: process.env.SOLANA_PRIVATE_KEY || "",
