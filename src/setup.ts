@@ -18,11 +18,16 @@ import {
   Keypair,
   PublicKey,
   SystemProgram,
+  Transaction,
+  TransactionInstruction,
+  sendAndConfirmTransaction,
 } from "@solana/web3.js";
 import {
   TOKEN_2022_PROGRAM_ID,
   ASSOCIATED_TOKEN_PROGRAM_ID,
   getAssociatedTokenAddressSync,
+  createAssociatedTokenAccountInstruction,
+  getAccount,
 } from "@solana/spl-token";
 import nacl from "tweetnacl";
 import fs from "fs";
@@ -147,7 +152,7 @@ async function main() {
 
   // Step 3: Get guest JWT
   console.log("\n📋 Step 3: Getting guest JWT from TxODDS\n");
-  const authRes = await fetch("${TXLINE_API_BASE}/auth/guest/start", { method: "POST" });
+  const authRes = await fetch(`${TXLINE_API_BASE}/auth/guest/start`, { method: "POST" });
   if (!authRes.ok) {
     throw new Error(`Auth failed: ${authRes.status} ${authRes.statusText}`);
   }
@@ -169,7 +174,7 @@ async function main() {
   );
 
   const [tokenTreasuryPda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("token_treasury")],
+    [Buffer.from("token_treasury_v2")],
     PROGRAM_ID
   );
 
@@ -187,6 +192,32 @@ async function main() {
     TOKEN_2022_PROGRAM_ID
   );
 
+  // Create token accounts if they don't exist
+  const atasToCreate: { address: PublicKey; owner: PublicKey; label: string }[] = [
+    { address: userTokenAccount, owner: keypair.publicKey, label: "User token account" },
+    { address: tokenTreasuryVault, owner: tokenTreasuryPda, label: "Treasury vault" },
+  ];
+
+  for (const ata of atasToCreate) {
+    try {
+      await getAccount(connection, ata.address, "confirmed", TOKEN_2022_PROGRAM_ID);
+      console.log(`   ${ata.label} exists`);
+    } catch {
+      console.log(`   Creating ${ata.label}...`);
+      const createAtaIx = createAssociatedTokenAccountInstruction(
+        keypair.publicKey,
+        ata.address,
+        ata.owner,
+        TXL_MINT,
+        TOKEN_2022_PROGRAM_ID,
+        ASSOCIATED_TOKEN_PROGRAM_ID
+      );
+      const tx = new Transaction().add(createAtaIx);
+      const ataSig = await sendAndConfirmTransaction(connection, tx, [keypair]);
+      console.log(`   ✅ ${ata.label} created: ${ataSig}`);
+    }
+  }
+
   console.log(`   Program ID:     ${PROGRAM_ID.toBase58()}`);
   console.log(`   Pricing Matrix: ${pricingMatrixPda.toBase58()}`);
   console.log(`   Treasury PDA:   ${tokenTreasuryPda.toBase58()}`);
@@ -195,21 +226,32 @@ async function main() {
 
   let txSig: string;
   try {
-    // @ts-ignore — Anchor generic depth exceeds TS limit
-    txSig = await program.methods
-      .subscribe(SERVICE_LEVEL_ID, DURATION_WEEKS)
-      .accounts({
-        user: keypair.publicKey,
-        pricingMatrix: pricingMatrixPda,
-        tokenMint: TXL_MINT,
-        userTokenAccount: userTokenAccount,
-        tokenTreasuryVault: tokenTreasuryVault,
-        tokenTreasuryPda: tokenTreasuryPda,
-        tokenProgram: TOKEN_2022_PROGRAM_ID,
-        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-        systemProgram: SystemProgram.programId,
-      })
-      .rpc();
+    // Build subscribe instruction manually to bypass Anchor account validation
+    const discriminator = Buffer.from([254, 28, 191, 138, 156, 179, 183, 53]);
+    const serviceLevelBuf = Buffer.alloc(2);
+    serviceLevelBuf.writeUInt16LE(SERVICE_LEVEL_ID);
+    const weeksBuf = Buffer.alloc(1);
+    weeksBuf.writeUInt8(DURATION_WEEKS);
+    const data = Buffer.concat([discriminator, serviceLevelBuf, weeksBuf]);
+
+    const ix = new TransactionInstruction({
+      programId: PROGRAM_ID,
+      keys: [
+        { pubkey: keypair.publicKey, isSigner: true, isWritable: true },
+        { pubkey: pricingMatrixPda, isSigner: false, isWritable: false },
+        { pubkey: TXL_MINT, isSigner: false, isWritable: false },
+        { pubkey: userTokenAccount, isSigner: false, isWritable: true },
+        { pubkey: tokenTreasuryVault, isSigner: false, isWritable: true },
+        { pubkey: tokenTreasuryPda, isSigner: false, isWritable: false },
+        { pubkey: TOKEN_2022_PROGRAM_ID, isSigner: false, isWritable: false },
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+        { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+      ],
+      data,
+    });
+
+    const subscribeTx = new Transaction().add(ix);
+    txSig = await sendAndConfirmTransaction(connection, subscribeTx, [keypair]);
 
     console.log(`   ✅ Subscription tx: ${txSig}`);
   } catch (err: any) {
@@ -235,7 +277,7 @@ async function main() {
   const signatureBytes = nacl.sign.detached(message, keypair.secretKey);
   const walletSignature = Buffer.from(signatureBytes).toString("base64");
 
-  const activateRes = await fetch("${TXLINE_API_BASE}/api/token/activate", {
+  const activateRes = await fetch(`${TXLINE_API_BASE}/api/token/activate`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -253,8 +295,14 @@ async function main() {
     throw new Error(`Token activation failed: ${activateRes.status} — ${errorText}`);
   }
 
-  const activateData = await activateRes.json();
-  const apiToken = (activateData as any).token || (activateData as any).apiToken || String(activateData);
+  const responseText = await activateRes.text();
+  let apiToken: string;
+  try {
+    const parsed = JSON.parse(responseText);
+    apiToken = parsed.token || parsed.apiToken || String(parsed);
+  } catch {
+    apiToken = responseText.trim();
+  }
   console.log(`   ✅ API token: ${String(apiToken).slice(0, 20)}...`);
 
   // Step 6: Save everything
