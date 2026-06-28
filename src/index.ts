@@ -10,8 +10,10 @@ import { narrateAlert } from "./engine/narrator";
 import { createScoresStream } from "./txodds/scores-stream";
 import { createOddsStream } from "./txodds/odds-stream";
 import { getSubscribersForFixture, getUserSettings, incrementAlertCount, logAlert } from "./db/queries";
+import { fetchFixtures } from "./txodds/client";
 import { getDb } from "./db/schema";
 import type { Bot } from "grammy";
+import http from "http";
 
 const oddsTracker = new OddsTracker();
 const eventTracker = new EventTracker();
@@ -88,7 +90,12 @@ async function main(): Promise<void> {
   validateConfig();
   getDb(); // initialize database
 
-  bot = createBot(eventTracker, (fixtureId) => {
+  bot = createBot(eventTracker, async (fixtureId) => {
+    try {
+      const fixtures = await fetchFixtures();
+      const f = fixtures.find((fx) => fx.fixtureId === fixtureId);
+      if (f) eventTracker.setMatchInfo(fixtureId, f.team1, f.team2);
+    } catch {}
     startStreamsForFixture(fixtureId);
   });
 
@@ -97,6 +104,32 @@ async function main(): Promise<void> {
     onStart: () => {
       logger.info("main", "Whistle is live. Watching for opportunities...");
     },
+  });
+
+  // Health check server for Railway
+  const port = process.env.PORT || 3000;
+  const server = http.createServer((req, res) => {
+    if (req.url === "/health" || req.url === "/") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ status: "ok", activeStreams: activeStreams.size }));
+    } else if (req.url === "/api/alerts") {
+      const { getDb } = require("./db/schema");
+      const db = getDb();
+      const alerts = (db.alerts || []).slice(-50).reverse();
+      res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+      res.end(JSON.stringify(alerts));
+    } else {
+      res.writeHead(404);
+      res.end();
+    }
+  });
+  server.listen(port, () => logger.info("main", `Health server on port ${port}`));
+
+  process.on("SIGTERM", () => {
+    logger.info("main", "SIGTERM received, shutting down");
+    bot.stop();
+    server.close();
+    process.exit(0);
   });
 
   // If TxODDS credentials are set, also start global streams

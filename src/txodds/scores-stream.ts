@@ -38,7 +38,11 @@ export function createScoresStream(opts: ScoresStreamOptions): EventEmitter {
 
     while (!stopped) {
       const { value, done } = await reader.read();
-      if (done) break;
+      if (done) {
+        logger.info("scores-stream", "Stream ended, reconnecting in 3s");
+        if (!stopped) setTimeout(startWithReconnect, 3000);
+        return;
+      }
 
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split("\n");

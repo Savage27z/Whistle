@@ -1,25 +1,28 @@
-export interface OddsValue {
-  name: string;
-  value: number;
-  line?: number;
-}
-
-export interface OddsMarket {
-  oddsType: string;
-  values: OddsValue[];
-}
-
-export interface BookmakerOdds {
-  bookmakerId: number;
-  bookmakerName: string;
-  odds: OddsMarket[];
+export interface RawOddsPayload {
+  FixtureId: number;
+  MessageId: string;
+  Ts: number;
+  Bookmaker: string;
+  BookmakerId: number;
+  SuperOddsType: string;
+  InRunning: boolean;
+  GameState?: string;
+  MarketParameters?: string;
+  MarketPeriod?: string;
+  PriceNames?: string[];
+  Prices?: number[];
+  Pct?: string[];
 }
 
 export interface OddsUpdate {
   fixtureId: number;
-  bookmakers: BookmakerOdds[];
+  bookmakerId: number;
+  bookmakerName: string;
+  oddsType: string;
+  inRunning: boolean;
+  priceNames: string[];
+  prices: number[];
   ts: number;
-  seq: number;
 }
 
 export interface ScoreSoccerTeam {

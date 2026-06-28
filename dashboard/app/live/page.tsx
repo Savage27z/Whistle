@@ -86,8 +86,8 @@ export default function LiveDashboard() {
                 background: "#111",
                 borderRadius: 12,
                 padding: 20,
-                borderLeft: `4px solid ${SEVERITY_COLORS[alert.severity] || "#333"}`,
                 border: "1px solid #222",
+                borderLeft: `4px solid ${SEVERITY_COLORS[alert.severity] || "#333"}`,
               }}
             >
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>

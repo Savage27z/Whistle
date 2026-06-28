@@ -33,56 +33,57 @@ export class OddsTracker {
     const signals: OddsSignal[] = [];
     const fixtureState = this.getOrCreate(update.fixtureId);
 
-    for (const bookmaker of update.bookmakers) {
-      for (const market of bookmaker.odds) {
-        for (const val of market.values) {
-          const key = `${bookmaker.bookmakerId}:${market.oddsType}:${val.name}`;
-          const marketKey = `${market.oddsType}:${val.name}`;
+    for (let i = 0; i < update.priceNames.length; i++) {
+      const priceName = update.priceNames[i];
+      const priceRaw = update.prices[i];
+      if (priceName === undefined || priceRaw === undefined) continue;
 
-          const history = fixtureState.history.get(key) || [];
-          const prevValue = history.length > 0 ? history[history.length - 1].value : null;
+      const price = priceRaw / 1000;
+      const key = `${update.bookmakerId}:${update.oddsType}:${priceName}`;
+      const marketKey = `${update.oddsType}:${priceName}`;
 
-          history.push({ value: val.value, ts: update.ts, bookmakerId: bookmaker.bookmakerId });
-          if (history.length > MAX_HISTORY) history.splice(0, history.length - MAX_HISTORY);
-          fixtureState.history.set(key, history);
+      const history = fixtureState.history.get(key) || [];
+      const prevValue = history.length > 0 ? history[history.length - 1].value : null;
 
-          const velocity = this.calculateVelocity(history, 60_000);
+      history.push({ value: price, ts: update.ts, bookmakerId: update.bookmakerId });
+      if (history.length > MAX_HISTORY) history.splice(0, history.length - MAX_HISTORY);
+      fixtureState.history.set(key, history);
 
-          if (Math.abs(velocity) > 0.10) {
-            const bookmakerCount = this.countMovingBookmakers(fixtureState, market.oddsType, val.name, 60_000);
-            signals.push({
-              type: "sharp_movement",
-              fixtureId: update.fixtureId,
-              market: marketKey,
-              velocity,
-              currentValue: val.value,
-              bookmakerCount,
-              ts: update.ts,
-            });
-          }
+      const velocity = this.calculateVelocity(history, 60_000);
 
-          const spread = this.calculateSpread(fixtureState, market.oddsType, val.name);
-          if (spread > 0.15) {
-            signals.push({
-              type: "bookmaker_disagreement",
-              fixtureId: update.fixtureId,
-              market: marketKey,
-              spread,
-              ts: update.ts,
-            });
-          }
+      if (Math.abs(velocity) > 0.10) {
+        const bookmakerCount = this.countMovingBookmakers(fixtureState, update.oddsType, priceName, 60_000);
+        signals.push({
+          type: "sharp_movement",
+          fixtureId: update.fixtureId,
+          market: marketKey,
+          velocity,
+          currentValue: price,
+          bookmakerCount,
+          ts: update.ts,
+        });
+      }
 
-          if (prevValue !== null && val.value < 1.2 && prevValue > 1.5) {
-            signals.push({
-              type: "odds_collapse",
-              fixtureId: update.fixtureId,
-              market: marketKey,
-              from: prevValue,
-              to: val.value,
-              ts: update.ts,
-            });
-          }
-        }
+      const spread = this.calculateSpread(fixtureState, update.oddsType, priceName);
+      if (spread > 0.15) {
+        signals.push({
+          type: "bookmaker_disagreement",
+          fixtureId: update.fixtureId,
+          market: marketKey,
+          spread,
+          ts: update.ts,
+        });
+      }
+
+      if (prevValue !== null && price < 1.2 && prevValue > 1.5) {
+        signals.push({
+          type: "odds_collapse",
+          fixtureId: update.fixtureId,
+          market: marketKey,
+          from: prevValue,
+          to: price,
+          ts: update.ts,
+        });
       }
     }
 

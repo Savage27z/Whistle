@@ -120,7 +120,7 @@ export function setupCommands(bot: Bot, eventTracker: EventTracker, onWatch: (fi
       }
     }
 
-    await ctx.reply(msg, { parse_mode: "Markdown" });
+    await ctx.reply(msg, { parse_mode: "MarkdownV2" });
   });
 
   bot.command("alerts", async (ctx) => {

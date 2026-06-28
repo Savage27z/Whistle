@@ -1,7 +1,20 @@
 import { EventEmitter } from "events";
 import { ENDPOINTS } from "./constants";
 import { logger } from "../utils/logger";
-import type { OddsUpdate } from "./types";
+import type { OddsUpdate, RawOddsPayload } from "./types";
+
+function mapOddsPayload(raw: RawOddsPayload): OddsUpdate {
+  return {
+    fixtureId: raw.FixtureId,
+    bookmakerId: raw.BookmakerId,
+    bookmakerName: raw.Bookmaker,
+    oddsType: raw.SuperOddsType,
+    inRunning: raw.InRunning,
+    priceNames: raw.PriceNames || [],
+    prices: raw.Prices || [],
+    ts: raw.Ts,
+  };
+}
 
 export interface OddsStreamOptions {
   jwt: string;
@@ -38,7 +51,11 @@ export function createOddsStream(opts: OddsStreamOptions): EventEmitter {
 
     while (!stopped) {
       const { value, done } = await reader.read();
-      if (done) break;
+      if (done) {
+        logger.info("odds-stream", "Stream ended, reconnecting in 3s");
+        if (!stopped) setTimeout(startWithReconnect, 3000);
+        return;
+      }
 
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split("\n");
@@ -50,8 +67,9 @@ export function createOddsStream(opts: OddsStreamOptions): EventEmitter {
 
         if (trimmed.startsWith("data:")) {
           try {
-            const data: OddsUpdate = JSON.parse(trimmed.slice(5).trim());
-            emitter.emit("data", data);
+            const raw = JSON.parse(trimmed.slice(5).trim()) as RawOddsPayload;
+            if (!raw.FixtureId) continue;
+            emitter.emit("data", mapOddsPayload(raw));
           } catch {
             // malformed, skip
           }
