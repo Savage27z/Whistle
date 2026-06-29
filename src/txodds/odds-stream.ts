@@ -69,11 +69,11 @@ export function createOddsStream(opts: OddsStreamOptions): StoppableEmitter {
     let buffer = "";
 
     while (!stopped) {
-      let timer: ReturnType<typeof setTimeout>;
+      let timer: ReturnType<typeof setTimeout> | undefined;
       const readWithTimeout = Promise.race([
         reader.read(),
         new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("read timeout")), 90_000); }),
-      ]).finally(() => clearTimeout(timer!));
+      ]).finally(() => clearTimeout(timer));
       const { value, done } = await readWithTimeout;
       if (done) {
         logger.info("odds-stream", "Stream ended, reconnecting in 3s");

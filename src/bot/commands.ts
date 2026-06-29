@@ -16,7 +16,7 @@ import type { EventTracker } from "../engine/event-tracker";
 import type { Severity, DivergenceDetector } from "../engine/divergence";
 import type { OddsTracker } from "../engine/odds-tracker";
 import { logger } from "../utils/logger";
-import { escHtml, canCallOpenRouter, markOpenRouter429, markOpenRouterSuccess } from "../engine/narrator";
+import { escHtml, canCallOpenRouter, markOpenRouter429, markOpenRouterSuccess, OPENROUTER_URL } from "../engine/narrator";
 import { config } from "../utils/config";
 
 export function setupCommands(
@@ -503,7 +503,7 @@ export function setupCommands(
       : "none";
 
     try {
-      const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      const res = await fetch(OPENROUTER_URL, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

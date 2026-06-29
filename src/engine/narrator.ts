@@ -3,7 +3,7 @@ import { logger } from "../utils/logger";
 import type { DivergenceAlert } from "./divergence";
 import type { MatchState } from "./event-tracker";
 
-const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+export const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
 let lastApiCall = 0;
 let apiBackoffMs = 30_000;

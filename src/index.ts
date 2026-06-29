@@ -226,8 +226,8 @@ async function main(): Promise<void> {
   });
   server.listen(port, () => logger.info("main", `Health server on port ${port}`));
 
-  process.on("SIGTERM", () => {
-    logger.info("main", "SIGTERM received, shutting down");
+  function shutdown(signal: string) {
+    logger.info("main", `${signal} received, shutting down`);
     bot.stop();
     globalScoresStream?.stop();
     globalOddsStream?.stop();
@@ -237,14 +237,17 @@ async function main(): Promise<void> {
     }
     server.close();
     process.exit(0);
-  });
+  }
+
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
 
   process.on("uncaughtException", (err: any) => {
     if (err?.error_code === 409) {
       logger.warn("main", "Bot polling conflict (409) — old instance still running, restarting...");
       process.exit(1);
     }
-    logger.error("main", `Uncaught exception: ${err.message}`);
+    logger.error("main", `Uncaught exception: ${err.stack || err.message}`);
     process.exit(1);
   });
 
