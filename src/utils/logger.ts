@@ -8,7 +8,8 @@ function log(level: Level, component: string, message: string, data?: Record<str
   const ts = new Date().toISOString();
   const prefix = `[${ts}] [${level.toUpperCase()}] [${component}]`;
   const suffix = data ? " " + JSON.stringify(data) : "";
-  console.log(`${prefix} ${message}${suffix}`);
+  const out = level === "error" || level === "warn" ? console.error : console.log;
+  out(`${prefix} ${message}${suffix}`);
 }
 
 export const logger = {

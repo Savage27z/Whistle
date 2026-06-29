@@ -7,6 +7,7 @@ export const config = {
   txoddsApiToken: process.env.TXODDS_API_TOKEN || "",
   solanaPrivateKey: process.env.SOLANA_PRIVATE_KEY || "",
   solanaRpcUrl: process.env.SOLANA_RPC_URL || "https://api.devnet.solana.com",
+  aiModel: process.env.AI_MODEL || "meta-llama/llama-3.3-70b-instruct:free",
 };
 
 export function validateConfig(): void {

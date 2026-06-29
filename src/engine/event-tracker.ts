@@ -180,6 +180,10 @@ export class EventTracker {
     return signals;
   }
 
+  cleanupFixture(fixtureId: number): void {
+    this.state.delete(fixtureId);
+  }
+
   private getOrCreate(fixtureId: number): MatchState {
     let s = this.state.get(fixtureId);
     if (!s) {

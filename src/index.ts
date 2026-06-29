@@ -8,8 +8,8 @@ import type { DivergenceAlert } from "./engine/divergence";
 import { narrateAlert, formatMatchEvent } from "./engine/narrator";
 import { createScoresStream } from "./txodds/scores-stream";
 import { createOddsStream } from "./txodds/odds-stream";
-import type { StoppableEmitter } from "./txodds/scores-stream";
-import { getSubscribersForFixture, getUserSettings, incrementAlertCount, logAlert, unsubscribeWatch } from "./db/queries";
+import type { StoppableEmitter } from "./txodds/types";
+import { getSubscribersForFixture, getUserSettings, incrementAlertCount, logAlert, unsubscribeWatch, unsubscribeFixture } from "./db/queries";
 import { fetchFixtures } from "./txodds/client";
 import { getDb } from "./db/schema";
 import type { Bot } from "grammy";
@@ -21,6 +21,8 @@ const divergenceDetector = new DivergenceDetector();
 divergenceDetector.setMatchStateResolver((id) => eventTracker.getMatchState(id));
 const activeStreams = new Map<number, { scores: StoppableEmitter; odds: StoppableEmitter } | null>();
 let globalStreamsStarted = false;
+let globalScoresStream: StoppableEmitter | null = null;
+let globalOddsStream: StoppableEmitter | null = null;
 
 let bot: Bot;
 
@@ -105,6 +107,14 @@ function stopStreamsForFixture(fixtureId: number): void {
   }
 }
 
+function cleanupFinishedFixture(fixtureId: number): void {
+  setTimeout(() => {
+    eventTracker.cleanupFixture(fixtureId);
+    oddsTracker.cleanupFixture(fixtureId);
+    logger.info("cleanup", `Cleaned up tracker state for fixture ${fixtureId}`);
+  }, 60_000);
+}
+
 function startStreamsForFixture(fixtureId: number): void {
   if (activeStreams.has(fixtureId)) return;
   if (globalStreamsStarted) {
@@ -138,6 +148,9 @@ function startStreamsForFixture(fixtureId: number): void {
       deliverMatchEvent(sig).catch((e) => logger.error("event-delivery", e.message));
       if (sig.type === "phase_change" && sig.to === "F") {
         stopStreamsForFixture(fixtureId);
+        const removed = unsubscribeFixture(fixtureId);
+        if (removed > 0) logger.info("cleanup", `Auto-unwatched ${removed} user(s) from finished fixture ${fixtureId}`);
+        cleanupFinishedFixture(fixtureId);
       }
     }
     if (eventSignals.length > 0) {
@@ -216,6 +229,12 @@ async function main(): Promise<void> {
   process.on("SIGTERM", () => {
     logger.info("main", "SIGTERM received, shutting down");
     bot.stop();
+    globalScoresStream?.stop();
+    globalOddsStream?.stop();
+    for (const [, streams] of activeStreams) {
+      streams?.scores.stop();
+      streams?.odds.stop();
+    }
     server.close();
     process.exit(0);
   });
@@ -233,15 +252,18 @@ async function main(): Promise<void> {
     globalStreamsStarted = true;
     logger.info("main", "Starting global TxODDS streams");
 
-    const globalScores = createScoresStream({
+    globalScoresStream = createScoresStream({
       jwt: config.txoddsJwt,
       apiToken: config.txoddsApiToken,
     });
 
-    const globalOdds = createOddsStream({
+    globalOddsStream = createOddsStream({
       jwt: config.txoddsJwt,
       apiToken: config.txoddsApiToken,
     });
+
+    const globalScores = globalScoresStream;
+    const globalOdds = globalOddsStream;
 
     fetchFixtures().then((fixtures) => {
       for (const f of fixtures) {
@@ -254,6 +276,11 @@ async function main(): Promise<void> {
       const signals = eventTracker.processScoreUpdate(scoreEvent);
       for (const sig of signals) {
         deliverMatchEvent(sig).catch((e) => logger.error("event-delivery", e.message));
+        if (sig.type === "phase_change" && sig.to === "F") {
+          const removed = unsubscribeFixture(sig.fixtureId);
+          if (removed > 0) logger.info("cleanup", `Auto-unwatched ${removed} user(s) from finished fixture ${sig.fixtureId}`);
+          cleanupFinishedFixture(sig.fixtureId);
+        }
       }
       if (signals.length > 0) {
         divergenceDetector.verifyEdgesFromEvents(signals);

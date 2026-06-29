@@ -1,7 +1,7 @@
 import { EventEmitter } from "events";
 import { ENDPOINTS } from "./constants";
 import { logger } from "../utils/logger";
-import type { OddsUpdate, RawOddsPayload } from "./types";
+import type { OddsUpdate, RawOddsPayload, StoppableEmitter } from "./types";
 
 function mapOddsPayload(raw: RawOddsPayload): OddsUpdate {
   return {
@@ -22,17 +22,17 @@ export interface OddsStreamOptions {
   fixtureId?: number;
 }
 
-export interface StoppableEmitter extends EventEmitter {
-  stop(): void;
-}
-
 export function createOddsStream(opts: OddsStreamOptions): StoppableEmitter {
   const emitter = new EventEmitter() as StoppableEmitter;
   let stopped = false;
+  let activeReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   let backoffMs = 3000;
   const MAX_BACKOFF = 60_000;
 
-  emitter.stop = () => { stopped = true; };
+  emitter.stop = () => {
+    stopped = true;
+    activeReader?.cancel().catch(() => {});
+  };
 
   async function connect() {
     const url = opts.fixtureId
@@ -64,6 +64,7 @@ export function createOddsStream(opts: OddsStreamOptions): StoppableEmitter {
     backoffMs = 3000;
 
     const reader = response.body.getReader();
+    activeReader = reader;
     const decoder = new TextDecoder();
     let buffer = "";
 

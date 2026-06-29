@@ -477,7 +477,7 @@ export function setupCommands(
     await generatePrediction(ctx, fixtureId);
   });
 
-  async function generatePrediction(ctx: any, fixtureId: number): Promise<void> {
+  async function generatePrediction(ctx: { reply: (text: string, opts?: any) => Promise<any> }, fixtureId: number): Promise<void> {
     const state = eventTracker.getMatchState(fixtureId);
     if (!state) {
       return ctx.reply("No match data available yet. Wait for the match to start.");
@@ -510,7 +510,7 @@ export function setupCommands(
           Authorization: `Bearer ${config.openrouterApiKey}`,
         },
         body: JSON.stringify({
-          model: "meta-llama/llama-3.3-70b-instruct:free",
+          model: config.aiModel,
           messages: [{ role: "user", content: `You are Whistle, an AI sports trading analyst. Generate a brief match prediction based on live data (max 8 lines, plain text only, no formatting characters).
 
 Match: ${state.team1} vs ${state.team2} | ${state.score[0]}-${state.score[1]} | ${state.minute}' | Phase: ${state.phase}
@@ -585,7 +585,7 @@ Rules:
     await sendHistory(ctx, fixtureId);
   });
 
-  async function sendHistory(ctx: any, fixtureId: number): Promise<void> {
+  async function sendHistory(ctx: { reply: (text: string, opts?: any) => Promise<any> }, fixtureId: number): Promise<void> {
     const allAlerts = getRecentAlerts(500);
     const matchAlerts = allAlerts.filter((a) => a.fixture_id === fixtureId).slice(0, 15);
 
@@ -597,12 +597,13 @@ Rules:
     }
 
     let msg = `📜 <b>Alert History — ${label}</b>\n\n`;
-    for (const a of matchAlerts) {
+    for (let i = 0; i < matchAlerts.length; i++) {
+      const a = matchAlerts[i];
       const time = new Date(a.created_at * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "UTC" }) + " UTC";
       const sevEmoji = a.severity === "critical" ? "🔴" : a.severity === "high" ? "🟠" : a.severity === "medium" ? "🟡" : "⚪";
       const line = `${sevEmoji} <b>${escHtml(a.title)}</b> — ${escHtml(time)}\n`;
       if (msg.length + line.length > 4000) {
-        msg += `\n...and ${matchAlerts.length - matchAlerts.indexOf(a)} more`;
+        msg += `\n...and ${matchAlerts.length - i} more`;
         break;
       }
       msg += line;

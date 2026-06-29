@@ -101,6 +101,12 @@ export interface RawScorePayload {
   PossibleEvent?: Partial<PossibleEvent>;
 }
 
+import { EventEmitter } from "events";
+
+export interface StoppableEmitter extends EventEmitter {
+  stop(): void;
+}
+
 export interface RawFixture {
   FixtureId: number;
   Participant1: string;

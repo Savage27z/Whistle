@@ -114,6 +114,10 @@ export class OddsTracker {
     return values[Math.floor(values.length / 2)];
   }
 
+  cleanupFixture(fixtureId: number): void {
+    this.state.delete(fixtureId);
+  }
+
   private getOrCreate(fixtureId: number): OddsState {
     let s = this.state.get(fixtureId);
     if (!s) {
