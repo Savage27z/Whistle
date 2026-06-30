@@ -61,11 +61,12 @@ export type PossessionType = "SafePossession" | "AttackPossession" | "DangerPoss
 export interface ScoreEvent {
   fixtureId: number;
   gameState: string;
-  statusSoccerId: SoccerStatus;
-  scoreSoccer: {
+  statusSoccerId?: SoccerStatus;
+  scoreSoccer?: {
     Participant1: ScoreSoccerTeam;
     Participant2: ScoreSoccerTeam;
   };
+  minute: number;
   dataSoccer?: DataSoccer;
   possessionType?: PossessionType;
   possession?: number;
@@ -76,7 +77,10 @@ export interface ScoreEvent {
   seq: number;
 }
 
-// Raw scores SSE payload (PascalCase from API)
+// Raw scores SSE payload (PascalCase from API). Most fields are sent
+// sparsely — a given message carries only what changed, not a full
+// snapshot. Score/StatusId are frequently absent and must NOT be
+// treated as "reset to zero/NS" when missing.
 export interface RawScorePayload {
   FixtureId: number;
   Action: string;
@@ -86,6 +90,8 @@ export interface RawScorePayload {
   Ts: number;
   Seq?: number;
   Participant?: number;
+  Possession?: number;
+  PossessionType?: "SafePossession" | "AttackPossession" | "DangerPossession" | "HighDangerPossession";
   Score?: {
     Participant1: ScoreSoccerTeam;
     Participant2: ScoreSoccerTeam;
@@ -94,6 +100,7 @@ export interface RawScorePayload {
     Goal?: boolean;
     GoalType?: string;
     PlayerId?: number;
+    Participant?: number;
   };
   Clock?: { Running: boolean; Seconds: number };
   Parti1State?: { PossibleEvent?: Partial<PossibleEvent> };

@@ -23,7 +23,8 @@ export function getDb(): DbData {
       try {
         data = JSON.parse(fs.readFileSync(DB_PATH, "utf-8"));
         logger.info("db", `Loaded data from ${DB_PATH}`);
-      } catch {
+      } catch (err) {
+        logger.error("db", `Corrupt or unreadable ${DB_PATH}, starting fresh: ${(err as Error).message}`);
         data = defaultData();
       }
     } else {
@@ -34,15 +35,32 @@ export function getDb(): DbData {
   return data!;
 }
 
+function writeNow(): void {
+  if (!data) return;
+  try {
+    const tmpPath = `${DB_PATH}.tmp`;
+    fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2));
+    fs.renameSync(tmpPath, DB_PATH);
+  } catch (err) {
+    logger.error("db", `Failed to save: ${(err as Error).message}`);
+  }
+}
+
 export function saveDb(): void {
   if (!data) return;
   if (saveTimer) return; // debounce
   saveTimer = setTimeout(() => {
     saveTimer = null;
-    try {
-      fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2));
-    } catch (err) {
-      logger.error("db", `Failed to save: ${(err as Error).message}`);
-    }
+    writeNow();
   }, 1000);
+}
+
+// Flush any pending debounced write immediately — call before process exit
+// so the last <1s of activity (e.g. before a SIGTERM redeploy) isn't lost.
+export function flushDb(): void {
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
+  writeNow();
 }

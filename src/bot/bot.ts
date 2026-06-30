@@ -8,7 +8,7 @@ import type { OddsTracker } from "../engine/odds-tracker";
 
 export function createBot(
   eventTracker: EventTracker,
-  onWatch: (fixtureId: number) => void,
+  onWatch: (fixtureId: number) => Promise<void>,
   getStreamHealth: () => { active: number; globalConnected: boolean },
   divergenceDetector: DivergenceDetector,
   oddsTracker: OddsTracker,

@@ -25,6 +25,7 @@ export interface MatchState {
   dangerTeam: number | null;
   lastGoalMinute: number | null;
   lastEventTs: number;
+  lastSeq: number;
 }
 
 export class EventTracker {
@@ -45,15 +46,24 @@ export class EventTracker {
     const state = this.getOrCreate(update.fixtureId);
     const now = update.ts || Date.now();
 
-    if (update.scoreSoccer) {
+    // TxLINE seq numbers are monotonic per fixture within a connection. A
+    // sharply lower seq than what we've already applied means this message
+    // arrived out of order (reconnect replay, network reordering) — skip
+    // state-affecting fields so stale data can't overwrite the current score,
+    // but still let event signals (goal/card/etc) through below since those
+    // matter more than perfect ordering.
+    const isStale = update.seq > 0 && state.lastSeq > 0 && update.seq < state.lastSeq;
+    if (update.seq > state.lastSeq) state.lastSeq = update.seq;
+
+    if (update.scoreSoccer && !isStale) {
       state.score = [
         update.scoreSoccer.Participant1.Total.Goals,
         update.scoreSoccer.Participant2.Total.Goals,
       ];
     }
 
-    if (update.dataSoccer?.Minutes) {
-      state.minute = update.dataSoccer.Minutes;
+    if (update.minute) {
+      state.minute = update.minute;
     }
 
     // Danger possession tracking
@@ -198,6 +208,7 @@ export class EventTracker {
         dangerTeam: null,
         lastGoalMinute: null,
         lastEventTs: 0,
+        lastSeq: 0,
       };
       this.state.set(fixtureId, s);
     }

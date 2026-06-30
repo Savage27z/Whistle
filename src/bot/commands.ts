@@ -117,7 +117,7 @@ export function setupCommands(
         return ctx.reply("Invalid fixture ID. Use /watch to see available matches.");
       }
       subscribeWatch(userId, fixtureId);
-      onWatch(fixtureId);
+      await onWatch(fixtureId);
       const matchState = eventTracker.getMatchState(fixtureId);
       const label = matchState ? `${matchState.team1} vs ${matchState.team2}` : `fixture ${fixtureId}`;
       return ctx.reply(`✅ Now watching <b>${escHtml(label)}</b>. I'll alert you when I spot something.\n\nUse /unwatch to stop.`, { parse_mode: "HTML" });
@@ -151,7 +151,7 @@ export function setupCommands(
 
     ensureUser(userId, ctx.from.username);
     subscribeWatch(userId, fixtureId);
-    onWatch(fixtureId);
+    await onWatch(fixtureId);
 
     const matchState = eventTracker.getMatchState(fixtureId);
     const label = matchState ? `${matchState.team1} vs ${matchState.team2}` : `match ${fixtureId}`;
@@ -177,7 +177,7 @@ export function setupCommands(
       let count = 0;
       for (const f of fixtures) {
         subscribeWatch(userId, f.fixtureId);
-        onWatch(f.fixtureId);
+        await onWatch(f.fixtureId);
         count++;
       }
 

@@ -26,27 +26,8 @@ interface OddsState {
 }
 
 const MAX_HISTORY = 500;
-
-const MAJOR_MARKETS = new Set([
-  "MATCH_RESULT",
-  "MATCH_RESULT_3WAY",
-  "OVERUNDER",
-  "OVERUNDER_HALFTIME",
-  "BOTHTEAMSTOSCORE",
-  "DOUBLECHANCE",
-  "DRAWNOBET",
-  "HANDICAP",
-  "ASIAN_HANDICAP",
-  "CORRECT_SCORE",
-]);
-
-function isMajorMarket(oddsType: string): boolean {
-  return MAJOR_MARKETS.has(oddsType);
-}
-
-function isSyntheticBookmaker(name: string): boolean {
-  return name.includes("TXLine") || name.includes("Demargined") || name.includes("Stable");
-}
+const COLLAPSE_WINDOW_MS = 30_000;
+const COLLAPSE_MIN_ELAPSED_MS = 5_000;
 
 export class OddsTracker {
   private state: Map<number, OddsState> = new Map();
@@ -65,13 +46,10 @@ export class OddsTracker {
       const marketKey = `${update.oddsType}:${priceName}`;
 
       const history = fixtureState.history.get(key) || [];
-      const prevValue = history.length > 0 ? history[history.length - 1].value : null;
 
       history.push({ value: price, ts: update.ts, bookmakerId: update.bookmakerId, bookmakerName: update.bookmakerName });
       if (history.length > MAX_HISTORY) history.splice(0, history.length - MAX_HISTORY);
       fixtureState.history.set(key, history);
-
-      if (!isMajorMarket(update.oddsType)) continue;
 
       const velocity = this.calculateVelocity(history, 60_000);
 
@@ -102,15 +80,18 @@ export class OddsTracker {
         });
       }
 
-      if (prevValue !== null && price < 1.2 && prevValue > 1.5 && !isSyntheticBookmaker(update.bookmakerName)) {
-        signals.push({
-          type: "odds_collapse",
-          fixtureId: update.fixtureId,
-          market: marketKey,
-          from: prevValue,
-          to: price,
-          ts: update.ts,
-        });
+      if (price < 1.2) {
+        const baseline = this.findCollapseBaseline(history, update.ts);
+        if (baseline && baseline.value > 1.5) {
+          signals.push({
+            type: "odds_collapse",
+            fixtureId: update.fixtureId,
+            market: marketKey,
+            from: baseline.value,
+            to: price,
+            ts: update.ts,
+          });
+        }
       }
     }
 
@@ -155,16 +136,31 @@ export class OddsTracker {
     const now = history[history.length - 1].ts;
     const cutoff = now - windowMs;
     const older = history.filter((h) => h.ts <= cutoff);
-    if (older.length === 0) {
-      const first = history[0];
-      const last = history[history.length - 1];
-      if (first.value === 0) return 0;
-      return (last.value - first.value) / first.value;
-    }
+    // No observation old enough to anchor the window — there isn't enough
+    // data to claim a velocity yet. Falling back to the oldest-ever price
+    // (which could be hours stale, e.g. a pre-match line) produces bogus
+    // "sharp movement" signals on a tracker's very first updates.
+    if (older.length === 0) return 0;
     const baseline = older[older.length - 1];
     const current = history[history.length - 1];
     if (baseline.value === 0) return 0;
     return (current.value - baseline.value) / baseline.value;
+  }
+
+  // For collapse detection we need a baseline that's both old enough to
+  // represent a real move (not two ticks a few ms apart) and recent enough
+  // to be relevant (within COLLAPSE_WINDOW_MS), not the literal previous
+  // history entry which can be effectively simultaneous with the current one.
+  private findCollapseBaseline(history: OddsSnapshot[], nowTs: number): OddsSnapshot | null {
+    const cutoff = nowTs - COLLAPSE_WINDOW_MS;
+    const latestAllowed = nowTs - COLLAPSE_MIN_ELAPSED_MS;
+    for (let i = history.length - 1; i >= 0; i--) {
+      const h = history[i];
+      if (h.ts > latestAllowed) continue;
+      if (h.ts < cutoff) break;
+      return h;
+    }
+    return null;
   }
 
   private countMovingBookmakers(state: OddsState, oddsType: string, outcomeName: string, windowMs: number): number {

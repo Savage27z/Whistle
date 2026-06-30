@@ -74,7 +74,10 @@ export function createOddsStream(opts: OddsStreamOptions): StoppableEmitter {
         reader.read(),
         new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("read timeout")), 90_000); }),
       ]).finally(() => clearTimeout(timer));
-      const { value, done } = await readWithTimeout;
+      const { value, done } = await readWithTimeout.catch((err) => {
+        reader.cancel().catch(() => {});
+        throw err;
+      });
       if (done) {
         logger.info("odds-stream", "Stream ended, reconnecting in 3s");
         if (!stopped) setTimeout(startWithReconnect, 3000);

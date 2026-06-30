@@ -11,7 +11,7 @@ import { createOddsStream } from "./txodds/odds-stream";
 import type { StoppableEmitter } from "./txodds/types";
 import { getSubscribersForFixture, getUserSettings, incrementAlertCount, logAlert, unsubscribeWatch, unsubscribeFixture } from "./db/queries";
 import { fetchFixtures } from "./txodds/client";
-import { getDb } from "./db/schema";
+import { getDb, flushDb } from "./db/schema";
 import type { Bot } from "grammy";
 import http from "http";
 
@@ -235,6 +235,7 @@ async function main(): Promise<void> {
       streams?.scores.stop();
       streams?.odds.stop();
     }
+    flushDb();
     server.close();
     process.exit(0);
   }
@@ -282,6 +283,7 @@ async function main(): Promise<void> {
         if (sig.type === "phase_change" && sig.to === "F") {
           const removed = unsubscribeFixture(sig.fixtureId);
           if (removed > 0) logger.info("cleanup", `Auto-unwatched ${removed} user(s) from finished fixture ${sig.fixtureId}`);
+          activeStreams.delete(sig.fixtureId);
           cleanupFinishedFixture(sig.fixtureId);
         }
       }

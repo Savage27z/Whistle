@@ -7,6 +7,7 @@ const STATUS_MAP: Record<number, SoccerStatus> = {
   1: "H1", 2: "HT", 3: "H2", 4: "H2", 5: "F", 6: "ET1", 7: "ET2", 8: "PE",
 };
 
+// Fallback only — real payloads carry PossessionType directly (see below).
 const POSSESSION_MAP: Record<string, PossessionType> = {
   safe_possession: "SafePossession",
   attack_possession: "AttackPossession",
@@ -16,8 +17,8 @@ const POSSESSION_MAP: Record<string, PossessionType> = {
 
 function mapScorePayload(raw: RawScorePayload): ScoreEvent {
   const action = raw.Action || "";
-  const minutes = raw.Clock ? Math.floor(raw.Clock.Seconds / 60) : 0;
-  const participant = raw.Participant || (raw.Data as any)?.Participant || 0;
+  const minute = raw.Clock ? Math.floor(raw.Clock.Seconds / 60) : 0;
+  const participant = raw.Participant ?? raw.Data?.Participant ?? 0;
 
   const isGoal = action === "goal";
   const isRedCard = action === "red_card";
@@ -26,18 +27,22 @@ function mapScorePayload(raw: RawScorePayload): ScoreEvent {
   const isYellowCard = action === "yellow_card";
   const isCorner = action === "corner";
 
-  function safeTeam(team?: { Total?: Partial<{ Goals: number; YellowCards: number; RedCards: number; Corners: number }> }) {
-    return { Total: { Goals: team?.Total?.Goals ?? 0, YellowCards: team?.Total?.YellowCards ?? 0, RedCards: team?.Total?.RedCards ?? 0, Corners: team?.Total?.Corners ?? 0 } };
-  }
+  // TxODDS sends sparse deltas, not full snapshots — most messages omit
+  // Score/StatusId entirely. Only pass these through when actually present;
+  // the caller must preserve prior state rather than treating absence as 0/NS.
+  const statusSoccerId = raw.StatusId !== undefined ? STATUS_MAP[raw.StatusId] : undefined;
+  const scoreSoccer = raw.Score
+    ? { Participant1: raw.Score.Participant1, Participant2: raw.Score.Participant2 }
+    : undefined;
+
+  const possessionType = raw.PossessionType || POSSESSION_MAP[action];
 
   return {
     fixtureId: raw.FixtureId,
     gameState: raw.GameState || action,
-    statusSoccerId: STATUS_MAP[raw.StatusId || 0] || "NS",
-    scoreSoccer: {
-      Participant1: safeTeam(raw.Score?.Participant1),
-      Participant2: safeTeam(raw.Score?.Participant2),
-    },
+    statusSoccerId,
+    scoreSoccer,
+    minute,
     dataSoccer: (isGoal || isRedCard || isPenalty || isVAR || isYellowCard || isCorner) ? {
       Goal: isGoal,
       GoalType: (raw.Data?.GoalType as any) || "Other",
@@ -48,12 +53,12 @@ function mapScorePayload(raw: RawScorePayload): ScoreEvent {
       VAR: isVAR,
       FreeKickType: "Safe",
       ThrowInType: "Safe",
-      Minutes: minutes,
+      Minutes: minute,
       Participant: participant,
       PlayerId: raw.Data?.PlayerId || 0,
     } : undefined,
-    possessionType: POSSESSION_MAP[action],
-    possession: POSSESSION_MAP[action] ? participant : undefined,
+    possessionType,
+    possession: possessionType ? (raw.Possession ?? participant) : undefined,
     parti1StateSoccer: raw.Parti1State?.PossibleEvent ? { PossibleEvent: { Goal: !!raw.Parti1State.PossibleEvent.Goal, Penalty: !!raw.Parti1State.PossibleEvent.Penalty, Corner: !!raw.Parti1State.PossibleEvent.Corner } } : undefined,
     parti2StateSoccer: raw.Parti2State?.PossibleEvent ? { PossibleEvent: { Goal: !!raw.Parti2State.PossibleEvent.Goal, Penalty: !!raw.Parti2State.PossibleEvent.Penalty, Corner: !!raw.Parti2State.PossibleEvent.Corner } } : undefined,
     ts: raw.Ts,
@@ -119,7 +124,12 @@ export function createScoresStream(opts: ScoresStreamOptions): StoppableEmitter 
         reader.read(),
         new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("read timeout")), 90_000); }),
       ]).finally(() => clearTimeout(timer));
-      const { value, done } = await readWithTimeout;
+      const { value, done } = await readWithTimeout.catch((err) => {
+        // Timeout fired while reader.read() was still pending — abandon
+        // this connection rather than leaving it open in the background.
+        reader.cancel().catch(() => {});
+        throw err;
+      });
       if (done) {
         logger.info("scores-stream", "Stream ended, reconnecting in 3s");
         if (!stopped) setTimeout(startWithReconnect, 3000);
