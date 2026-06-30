@@ -27,6 +27,27 @@ interface OddsState {
 
 const MAX_HISTORY = 500;
 
+const MAJOR_MARKETS = new Set([
+  "MATCH_RESULT",
+  "MATCH_RESULT_3WAY",
+  "OVERUNDER",
+  "OVERUNDER_HALFTIME",
+  "BOTHTEAMSTOSCORE",
+  "DOUBLECHANCE",
+  "DRAWNOBET",
+  "HANDICAP",
+  "ASIAN_HANDICAP",
+  "CORRECT_SCORE",
+]);
+
+function isMajorMarket(oddsType: string): boolean {
+  return MAJOR_MARKETS.has(oddsType);
+}
+
+function isSyntheticBookmaker(name: string): boolean {
+  return name.includes("TXLine") || name.includes("Demargined") || name.includes("Stable");
+}
+
 export class OddsTracker {
   private state: Map<number, OddsState> = new Map();
 
@@ -50,9 +71,11 @@ export class OddsTracker {
       if (history.length > MAX_HISTORY) history.splice(0, history.length - MAX_HISTORY);
       fixtureState.history.set(key, history);
 
+      if (!isMajorMarket(update.oddsType)) continue;
+
       const velocity = this.calculateVelocity(history, 60_000);
 
-      const velocityThreshold = update.inRunning ? 0.10 : 0.20;
+      const velocityThreshold = update.inRunning ? 0.15 : 0.20;
       if (Math.abs(velocity) > velocityThreshold) {
         const bookmakerCount = this.countMovingBookmakers(fixtureState, update.oddsType, priceName, 60_000);
         if (bookmakerCount >= 2) {
@@ -79,7 +102,7 @@ export class OddsTracker {
         });
       }
 
-      if (prevValue !== null && price < 1.2 && prevValue > 1.5) {
+      if (prevValue !== null && price < 1.2 && prevValue > 1.5 && !isSyntheticBookmaker(update.bookmakerName)) {
         signals.push({
           type: "odds_collapse",
           fixtureId: update.fixtureId,
